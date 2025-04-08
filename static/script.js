@@ -17,6 +17,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const generateBtn = document.getElementById('generateBtn');
     const generateSpinner = document.getElementById('generate-spinner');
     const generateError = document.getElementById('generate-error');
+    const enableSecretMaskingCheckbox = document.getElementById('enableSecretMasking');
 
     const resultArea = document.getElementById('resultArea');
     const markdownOutput = document.getElementById('markdownOutput');
@@ -242,12 +243,23 @@ document.addEventListener('DOMContentLoaded', () => {
         hideElement(resultArea);
         markdownOutput.value = "Generating context...";
         summaryContainer.innerHTML = "";
+        document.getElementById('secretsMaskedAlert').classList.add('d-none');
         
+        // Récupérer la configuration de masquage des secrets
+        const enableSecretMasking = enableSecretMaskingCheckbox 
+            ? enableSecretMaskingCheckbox.checked 
+            : true; // Activé par défaut si le checkbox n'existe pas
+
         try {
             const response = await fetch('/generate', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-                body: JSON.stringify({ selected_files: selectedFiles })
+                body: JSON.stringify({ 
+                    selected_files: selectedFiles,
+                    masking_options: {
+                        enable_masking: enableSecretMasking
+                    }
+                })
             });
             const data = await response.json();
             if (!response.ok || !data.success) {
@@ -256,14 +268,36 @@ document.addEventListener('DOMContentLoaded', () => {
             
             // Display the markdown context
             markdownOutput.value = data.markdown || "";
+
+            // Afficher l'alerte de sécurité si des secrets ont été masqués
+            if (data.summary && data.summary.secrets_masked > 0) {
+                const secretsAlert = document.getElementById('secretsMaskedAlert');
+                const secretsDetails = document.getElementById('secretsMaskedDetails');
+                
+                // Afficher les détails
+                secretsDetails.innerHTML = `
+                    <li><strong>${data.summary.secrets_masked}</strong> sensitive items masked</li>
+                    <li><strong>${data.summary.files_with_secrets}</strong> of ${data.summary.files_count} files contained sensitive data</li>
+                `;
+                
+                // Afficher l'alerte
+                secretsAlert.classList.remove('d-none');
+            }
             
             // Display the summary separately
             if (data.summary) {
                 const summary = data.summary;
+                
+                // Ajouter une information sur les secrets masqués si applicable
+                const secretsMaskedInfo = summary.secrets_masked > 0 
+                    ? `<li>Sensitive data masked: ${summary.secrets_masked} items in ${summary.files_with_secrets} files</li>` 
+                    : '';
+                
                 summaryContainer.innerHTML = `
                 <div class="alert alert-primary">
                     <h6><i class="fas fa-info-circle"></i> Context summary</h6>
                     <ul class="mb-0">
+                        ${secretsMaskedInfo}
                         <li>Number of files: ${summary.files_count}</li>
                         <li>Number of characters: ${formatNumber(summary.char_count)}</li>
                         <li>Estimated tokens: ~${formatNumber(summary.estimated_tokens)}</li>

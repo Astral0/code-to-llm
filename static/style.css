@@ -184,3 +184,22 @@ body {
 .local-mode-alert {
     border-left: 3px solid #ffc107;
 }
+
+/* Styles pour le masquage des secrets */
+#secretsMaskedAlert {
+    border-left: 3px solid #fd7e14;
+    background-color: #fff3cd;
+}
+
+#secretsMaskedAlert h6 {
+    color: #fd7e14;
+}
+
+#secretsMaskedDetails {
+    margin-bottom: 0.5rem;
+}
+
+/* Style pour les éléments masqués dans le texte */
+.masked-secret {
+    background-color: #ffc107;
+}

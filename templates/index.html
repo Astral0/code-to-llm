@@ -66,6 +66,28 @@
           <button class="btn btn-success" id="generateBtn" title="Generate context for selected files">
             <i class="fas fa-play"></i> Generate context for selection
           </button>
+          
+          <!-- Option de configuration pour le masquage des secrets -->
+          <div class="dropdown ms-2">
+            <button class="btn btn-outline-secondary dropdown-toggle" type="button" id="secretMaskingOptions" data-bs-toggle="dropdown" aria-expanded="false">
+              <i class="fas fa-shield-alt"></i> Secret Masking
+            </button>
+            <ul class="dropdown-menu" aria-labelledby="secretMaskingOptions">
+              <li>
+                <div class="dropdown-item">
+                  <div class="form-check">
+                    <input class="form-check-input" type="checkbox" value="" id="enableSecretMasking" checked>
+                    <label class="form-check-label" for="enableSecretMasking">
+                      Mask sensitive data
+                    </label>
+                  </div>
+                </div>
+              </li>
+            </ul>
+          </div>
+          <button class="btn btn-success d-none" id="oldGenerateBtn" title="Generate context for selected files">
+            <i class="fas fa-play"></i> Generate context for selection
+          </button>
           <div id="generate-spinner" class="spinner-border spinner-border-sm text-success ms-2 visually-hidden" role="status">
             <span class="visually-hidden">Generating...</span>
           </div>
@@ -74,6 +96,14 @@
         <div id="resultArea" class="mt-3 visually-hidden">
           <!-- Container for the summary statistics -->
           <div id="summaryContainer" class="mb-3"></div>
+          
+          <!-- Alerte pour informer l'utilisateur des secrets masqués -->
+          <div id="secretsMaskedAlert" class="alert alert-warning mb-3 d-none">
+            <h6><i class="fas fa-shield-alt"></i> Security Notice</h6>
+            <p>Sensitive information was detected and masked in your files:</p>
+            <ul id="secretsMaskedDetails"></ul>
+            <p class="mb-0 small">This helps prevent sharing credentials, API keys, and other secrets with LLMs.</p>
+          </div>
           
           <h5><i class="fab fa-markdown text-muted"></i> Generated Markdown context:</h5>
           <div class="position-relative">
