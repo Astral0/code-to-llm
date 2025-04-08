@@ -14,6 +14,10 @@ A tool for preparing code repositories for LLM analysis and modification. Create
 - **Sensitive Data Protection**: Detects and masks API keys, passwords, tokens and other credentials
 - **Token Estimation**: Provides approximate token count for LLM context windows
 
+
+![image](https://github.com/user-attachments/assets/e2816992-9967-403a-b8d6-3df66e618a0e)
+
+
 ## ⚙️ Installation
 
 ### Requirements
