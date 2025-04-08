@@ -116,12 +116,9 @@ Project_Root/
 ```python
 # Main application code
 ...
-```
 --- END FILE: src/main.py ---
 
-...
 ```
-
 ## 💡 Tips for Using with LLMs
 
 - **Prompt Structure**: Provide the context followed by clear instructions about what modifications you need
