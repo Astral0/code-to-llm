@@ -26,7 +26,7 @@ A tool for preparing code repositories for LLM analysis and modification. Create
 ### Setup
 
 ```bash
-git clone https://github.com/yourusername/code-to-llm.git
+git clone https://github.com/Astral0/code-to-llm.git
 cd code-to-llm
 pip install -r requirements.txt
 ```
