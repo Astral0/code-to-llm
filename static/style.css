@@ -1,0 +1,186 @@
+/* static/style.css */
+
+body {
+    background-color: #f8f9fa; /* Light gray Bootstrap */
+    font-family: var(--bs-body-font-family); /* Use Bootstrap font */
+}
+
+.container {
+    max-width: 960px; /* Limit width for better readability */
+}
+
+/* Card styling for sections */
+.card {
+    border: 1px solid #dee2e6; /* Light border */
+    /* box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075); Removed for flatter look */
+}
+
+.card-header {
+    background-color: #e9ecef; /* Slightly darker header background */
+    font-weight: 500;
+    border-bottom: 1px solid #dee2e6;
+    padding: 0.75rem 1.25rem; /* Adjusted padding */
+}
+
+.card-body {
+     padding: 1.25rem; /* Adjusted padding */
+}
+
+/* File tree styling */
+.file-tree {
+    font-size: 0.9em; /* Slightly smaller font size for the tree */
+}
+
+.file-tree ul {
+    list-style-type: none;
+    padding-left: 25px; /* More indentation for levels */
+    margin-bottom: 0; /* Remove bottom margin from ULs */
+}
+
+.file-tree li {
+    padding: 2px 0; /* Light vertical spacing between items */
+}
+
+.file-tree .form-check {
+    /* Align checkbox and label correctly */
+    padding-left: 1.75em; /* Space for checkbox */
+    margin-bottom: 0; /* Avoid double margins */
+}
+
+.file-tree .form-check-input {
+    margin-top: 0.2em; /* Adjust vertical alignment of checkbox */
+    cursor: pointer;
+}
+
+.file-tree .form-check-label {
+    cursor: pointer;
+    display: inline-flex; /* To align icon and text */
+    align-items: center;
+    word-break: break-all; /* Break long filenames */
+}
+.file-tree .form-check-label i {
+    margin-right: 5px;
+    width: 16px; /* Fixed width for icon */
+    text-align: center;
+    color: #6c757d; /* Discreet color for icons */
+}
+.file-tree .folder > .form-check > .form-check-label {
+    font-weight: 500; /* Slightly bolder folders */
+}
+.file-tree .folder > .form-check > .form-check-label i {
+    color: #0d6efd; /* Different color for folder icons */
+}
+
+.file-tree .placeholder-message {
+    padding: 2rem;
+}
+
+
+/* Copy button styling */
+#copyBtn {
+    opacity: 0.6;
+    transition: opacity 0.2s ease-in-out, background-color 0.2s ease-in-out;
+    background-color: rgba(255, 255, 255, 0.7); /* Semi-transparent background */
+    border: 1px solid #ced4da;
+}
+
+#copyBtn:hover {
+    opacity: 1;
+    background-color: rgba(233, 236, 239, 0.9); /* More opaque background on hover */
+}
+
+/* Class for copy feedback */
+#copyBtn.copied-feedback {
+    background-color: rgba(25, 135, 84, 0.8); /* Bootstrap green semi-transparent */
+    color: white;
+    border-color: #198754;
+    opacity: 1;
+}
+#copyBtn.copied-feedback i {
+    color: white; /* Ensure check icon is white */
+}
+
+/* Result text area styling */
+#markdownOutput {
+    background-color: #e9ecef !important; /* Different background for text area */
+    border: 1px solid #ced4da;
+}
+
+/* Properly hide spinners and errors by default */
+.visually-hidden {
+    position: absolute !important;
+    width: 1px !important;
+    height: 1px !important;
+    padding: 0 !important;
+    margin: -1px !important;
+    overflow: hidden !important;
+    clip: rect(0, 0, 0, 0) !important;
+    white-space: nowrap !important;
+    border: 0 !important;
+}
+/* Display when needed (controlled by JS) */
+.spinner-border:not(.visually-hidden),
+.alert:not(.visually-hidden) {
+    position: static !important; width: auto !important; height: auto !important; padding: revert !important; margin: revert !important; overflow: visible !important; clip: auto !important; white-space: normal !important; border: revert !important; display: inline-block; /* For spinner */
+}
+.alert:not(.visually-hidden) { display: block; /* For alert */ }
+
+/* Adjustments for spinner/error alignment */
+#analyze-status, #generate-status { /* Using IDs if needed */
+    display: flex;
+    align-items: center;
+    min-height: 24px; /* Minimum height to prevent layout jumps */
+}
+
+/* Styling pour le mode local */
+#local-mode-section {
+    border-left: 4px solid #ffc107; /* bordure jaune pour indiquer le mode local */
+}
+
+#local-mode-section .card-header {
+    background-color: #fff3cd;
+    color: #866404;
+}
+
+#localFileInput {
+    cursor: pointer;
+}
+
+#processLocalFilesBtn {
+    white-space: nowrap;
+}
+
+/* Rendre le bouton "Browse" plus visible */
+#browseBtn {
+    background-color: #f8f9fa;
+    border-color: #ced4da;
+}
+
+#browseBtn:hover {
+    background-color: #e9ecef;
+}
+
+/* Style pour indiquer le mode actif */
+.mode-indicator {
+    padding: 5px 10px;
+    border-radius: 4px;
+    font-size: 0.875rem;
+    font-weight: 500;
+    display: inline-block;
+    margin-bottom: 10px;
+}
+
+.server-mode {
+    background-color: #cfe2ff;
+    color: #084298;
+}
+
+.local-mode {
+    background-color: #fff3cd;
+    color: #866404;
+}
+
+/* Alert spécifique pour le mode local */
+.local-mode-alert {
+    border-left: 3px solid #ffc107;
+}

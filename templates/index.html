@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LLM Context Builder</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" integrity="sha512-DTOQO9RWCH3ppGqcWaEA1BIZOC6xxalwEsw9c2QQeAIftl+Vegovlnee1c9QX4TctnWMn13TZye+giMm8e2LwA==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <div class="container mt-4">
+    <header class="pb-3 mb-4 border-bottom">
+      <h1 class="mb-0"><i class="fas fa-cogs text-primary"></i> LLM Project Context Builder</h1>
+      <p class="text-muted">Generate Markdown context for your project.</p>
+    </header>
+    
+    <section id="selection-section" class="card mb-4 shadow-sm">
+      <div class="card-header">
+        <i class="fas fa-folder-open"></i> Step 1: Select a local directory
+      </div>
+      <div class="card-body">
+        <div class="mb-3">
+          <label for="directoryPicker" class="form-label">Select a directory on your PC:</label>
+          <div class="input-group">
+            <span class="input-group-text"><i class="fas fa-folder"></i></span>
+            <input type="file" class="form-control" id="directoryPicker" webkitdirectory directory multiple>
+          </div>
+          <div class="form-text">
+            Use the selector to choose a local directory. The selected files and folders will be uploaded to generate the context.
+          </div>
+        </div>
+        <div id="analyze-status" class="mt-2 d-flex align-items-center" style="min-height: 24px;">
+          <div id="analyze-spinner" class="spinner-border spinner-border-sm text-primary me-2 visually-hidden" role="status">
+            <span class="visually-hidden">Analyzing...</span>
+          </div>
+          <div id="analyze-error" class="alert alert-danger p-1 mb-0 visually-hidden" role="alert" style="font-size: 0.9em;"></div>
+        </div>
+        <button class="btn btn-primary mt-3" type="button" id="analyzeBtn" title="Analyze directory">
+          <i class="fas fa-search"></i> Analyze directory
+        </button>
+      </div>
+    </section>
+    
+    <section id="file-selection-section" class="card mb-4 shadow-sm visually-hidden">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <span><i class="fas fa-tasks"></i> Step 2: Select files to include</span>
+        <div class="btn-group btn-group-sm" role="group" aria-label="Quick selection">
+          <button type="button" class="btn btn-outline-secondary" id="selectAllBtn" title="Select All"><i class="fas fa-check-square"></i> All</button>
+          <button type="button" class="btn btn-outline-secondary" id="deselectAllBtn" title="Deselect All"><i class="far fa-square"></i> None</button>
+        </div>
+      </div>
+      <div class="card-body">
+        <div id="fileList" class="file-tree border p-3 rounded bg-light" style="max-height: 400px; overflow-y: auto;">
+          <p class="text-muted text-center placeholder-message">The file tree will appear here after analysis.</p>
+        </div>
+      </div>
+    </section>
+    
+    <section id="generation-section" class="card mb-4 shadow-sm visually-hidden">
+      <div class="card-header">
+        <i class="fas fa-magic"></i> Step 3: Generate the context
+      </div>
+      <div class="card-body">
+        <div class="d-flex align-items-center mb-3">
+          <button class="btn btn-success" id="generateBtn" title="Generate context for selected files">
+            <i class="fas fa-play"></i> Generate context for selection
+          </button>
+          <div id="generate-spinner" class="spinner-border spinner-border-sm text-success ms-2 visually-hidden" role="status">
+            <span class="visually-hidden">Generating...</span>
+          </div>
+        </div>
+        <div id="generate-error" class="alert alert-danger p-2 visually-hidden" role="alert" style="font-size: 0.9em;"></div>
+        <div id="resultArea" class="mt-3 visually-hidden">
+          <!-- Container for the summary statistics -->
+          <div id="summaryContainer" class="mb-3"></div>
+          
+          <h5><i class="fab fa-markdown text-muted"></i> Generated Markdown context:</h5>
+          <div class="position-relative">
+            <textarea id="markdownOutput" class="form-control bg-light" rows="15" readonly style="font-family: var(--bs-font-monospace); font-size: 0.85em; white-space: pre; overflow-wrap: normal; overflow-x: auto;"></textarea>
+            <button id="copyBtn" class="btn btn-sm btn-outline-secondary position-absolute top-0 end-0 m-2" title="Copy to clipboard">
+              <i class="far fa-copy"></i> Copy
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+    
+    <footer class="text-center text-muted mt-5 mb-3">
+      <small>LLM Context Builder Tool</small>
+    </footer>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script>
+  <script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>
