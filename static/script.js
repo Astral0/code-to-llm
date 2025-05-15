@@ -377,7 +377,7 @@ document.addEventListener('DOMContentLoaded', () => {
             "Total files excluded (by .gitignore or rules)": summary.excluded_files_count,
             "Total lines of code included": summary.total_lines,
             "Total characters included": summary.total_chars,
-            "Estimated tokens (approximate)": summary.total_tokens
+            "Estimated tokens (approximate)": summary.estimated_tokens
         };
 
         for (const [key, value] of Object.entries(items)) {
