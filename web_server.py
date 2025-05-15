@@ -7,11 +7,32 @@ from pathlib import Path
 from collections import defaultdict
 import pathspec
 import re
+import configparser
 
 app = Flask(__name__, template_folder='templates', static_folder='static')
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
+
+# --- Configuration des instructions prédéfinies ---
+INSTRUCTION_TEXT_1 = "Ne fais rien, attends mes instructions." # Défaut
+INSTRUCTION_TEXT_2 = "Si des modifications du code source est nécessaire, tu dois présenter ta réponse sous la forme d'un fichier patch Linux. Considère que le fichier patch a été lancé depuis le répertoire du code-to-llm." # Défaut
+
+def load_config():
+    global INSTRUCTION_TEXT_1, INSTRUCTION_TEXT_2
+    config = configparser.ConfigParser()
+    try:
+        if os.path.exists('config.ini'):
+            config.read('config.ini', encoding='utf-8')
+            INSTRUCTION_TEXT_1 = config.get('Instructions', 'instruction1_text', fallback=INSTRUCTION_TEXT_1)
+            INSTRUCTION_TEXT_2 = config.get('Instructions', 'instruction2_text', fallback=INSTRUCTION_TEXT_2)
+            app.logger.info("Configuration des instructions chargée depuis config.ini")
+        else:
+            app.logger.warning("config.ini non trouvé, utilisation des instructions par défaut.")
+    except Exception as e:
+        app.logger.error(f"Erreur lors de la lecture de config.ini: {e}. Utilisation des instructions par défaut.")
+
+load_config() # Charger la configuration au démarrage
 
 # --- In-memory cache for uploaded files ---
 # Each uploaded file is a dictionary with keys: "name", "path", "content"
@@ -353,7 +374,9 @@ def should_ignore_path(path, spec):
 @app.route('/')
 def index():
     app.logger.info("Received request for '/' - Serving index.html")
-    return render_template('index.html')
+    return render_template('index.html', 
+                           instruction_text_1=INSTRUCTION_TEXT_1, 
+                           instruction_text_2=INSTRUCTION_TEXT_2)
 
 @app.route('/upload', methods=['POST'])
 def upload_directory():
@@ -484,9 +507,13 @@ def generate_context():
     mask_mode = masking_options.get("mask_mode", "mask")  # 'mask' ou 'remove'
     
     # Récupérer les instructions personnalisées
-    instructions = data.get("instructions", "Ne fais rien, attends mes instructions.")
+    # Si les instructions envoyées sont une chaîne vide, les garder vides, sinon utiliser une chaîne vide par défaut.
+    instructions = data.get("instructions") # Peut être None ou une chaîne vide
+    if instructions is None: # Si la clé n'est pas là (ne devrait pas arriver si le front envoie toujours qqch)
+        instructions = "" # Ou une autre valeur par défaut si vous préférez, mais vide est plus logique ici
     
     app.logger.info(f"Secret masking: {'enabled' if enable_masking else 'disabled'}, mode: {mask_mode}")
+    app.logger.info(f"Instructions reçues: {instructions[:100]}...") # Log des instructions
     
     selected_paths = data["selected_files"]
     uploaded_files = analysis_cache.get("uploaded_files", [])

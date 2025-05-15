@@ -22,6 +22,8 @@ A tool for preparing code repositories for LLM analysis and modification. Create
 - **Context Regeneration**: Easily regenerate the context. If files have been modified, you'll be guided to re-select the directory to ensure all changes are captured, while your previous file selection is preserved.
 - **Secret Masking Toggle**: Enable or disable sensitive data masking directly from the UI.
 - **Copy to Clipboard**: Quickly copy the generated Markdown context.
+- **Includes buttons for quickly inserting predefined, configurable instruction templates.**
+- **Smart insertion logic: appends to existing custom text, or replaces the last predefined instruction if one was just inserted.**
 
 ## ⚙️ Installation
 

@@ -64,7 +64,15 @@
       <div class="card-body">
         <div class="mb-3">
           <label for="instructionsTextarea" class="form-label">Instructions à ajouter à la fin du contexte:</label>
-          <textarea id="instructionsTextarea" class="form-control" rows="3">Ne fais rien, attends mes instructions.</textarea>
+          <textarea id="instructionsTextarea" class="form-control" rows="3" placeholder="Entrez ici vos instructions ou utilisez les boutons ci-dessous..."></textarea>
+          <div class="mt-2">
+            <button class="btn btn-sm btn-outline-secondary me-1" type="button" id="insertInstructionBtn1" data-instruction="{{ instruction_text_1 }}" title="Insérer l'instruction prédéfinie 1">
+              <i class="fas fa-comment-dots"></i> Instruction 1 (Attente)
+            </button>
+            <button class="btn btn-sm btn-outline-secondary" type="button" id="insertInstructionBtn2" data-instruction="{{ instruction_text_2 }}" title="Insérer l'instruction prédéfinie 2">
+              <i class="fas fa-file-code"></i> Instruction 2 (Patch)
+            </button>
+          </div>
           <div class="form-text">
             Ces instructions seront ajoutées à la fin du contexte markdown généré.
           </div>

@@ -8,6 +8,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const analyzeError = document.getElementById('analyze-error');
     const analyzeStatusContainer = document.getElementById('analyze-status');
     const instructionsTextarea = document.getElementById('instructionsTextarea');
+    const insertInstructionBtn1 = document.getElementById('insertInstructionBtn1');
+    const insertInstructionBtn2 = document.getElementById('insertInstructionBtn2');
     const regenerateBtn = document.getElementById('regenerateBtn');
 
     const fileSelectionSection = document.getElementById('file-selection-section');
@@ -272,10 +274,8 @@ document.addEventListener('DOMContentLoaded', () => {
     async function executeActualGeneration() {
         const selectedCheckboxes = fileListDiv.querySelectorAll('.form-check-input:checked');
         // The value of each checkbox is the full path of the selected file
-        let selectedFiles = Array.from(selectedCheckboxes).map(cb => cb.value);
-        
-        // Filter the selected paths to keep only those in includedFilePaths
-        selectedFiles = selectedFiles.filter(path => includedFilePaths.includes(path));
+        const selectedFiles = Array.from(selectedCheckboxes).map(cb => cb.value)
+                                     .filter(path => includedFilePaths.includes(path));
         
         if (selectedFiles.length === 0) {
             showError(generateError, "Please select at least one file.", null);
@@ -290,7 +290,7 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('secretsMaskedAlert').classList.add('d-none');
         
         // Récupérer les instructions personnalisées
-        const instructions = instructionsTextarea.value || "Ne fais rien, attends mes instructions.";
+        const instructions = instructionsTextarea.value; // Prend la valeur actuelle, peut être vide
 
         // Récupérer la configuration de masquage des secrets
         const enableSecretMasking = enableSecretMaskingCheckbox 
@@ -422,4 +422,59 @@ document.addEventListener('DOMContentLoaded', () => {
         // Optionnel: faire défiler vers le haut pour que l'utilisateur voie le message et le sélecteur
         window.scrollTo({ top: 0, behavior: 'smooth' });
     });
+
+    // --- Gestion des boutons d'instructions prédéfinies ---
+    if (insertInstructionBtn1) {
+        insertInstructionBtn1.addEventListener('click', () => {
+            const newInstructionText = insertInstructionBtn1.dataset.instruction;
+            const currentFullText = instructionsTextarea.value;
+            const instruction1Data = insertInstructionBtn1.dataset.instruction;
+            const instruction2Data = insertInstructionBtn2 ? insertInstructionBtn2.dataset.instruction : null;
+
+            const textToInsert = "\n" + newInstructionText;
+
+            if (currentFullText.trim() === "") {
+                // Si vide, insérer simplement
+                instructionsTextarea.value = textToInsert;
+            } else if (instruction2Data && currentFullText.endsWith("\n" + instruction2Data)) {
+                // Si le texte se termine par l'instruction 2, la remplacer par l'instruction 1
+                const baseText = currentFullText.substring(0, currentFullText.length - ( "\n" + instruction2Data).length);
+                instructionsTextarea.value = baseText + textToInsert;
+            } else if (currentFullText.endsWith("\n" + instruction1Data)) {
+                // Si le texte se termine déjà par l'instruction 1, la remplacer (pas de changement visible, mais correct)
+                const baseText = currentFullText.substring(0, currentFullText.length - ( "\n" + instruction1Data).length);
+                instructionsTextarea.value = baseText + textToInsert;
+            } else {
+                // Sinon, on ajoute
+                instructionsTextarea.value += textToInsert;
+            }
+        });
+    }
+
+    if (insertInstructionBtn2) {
+        insertInstructionBtn2.addEventListener('click', () => {
+            const newInstructionText = insertInstructionBtn2.dataset.instruction;
+            const currentFullText = instructionsTextarea.value;
+            const instruction1Data = insertInstructionBtn1 ? insertInstructionBtn1.dataset.instruction : null;
+            const instruction2Data = insertInstructionBtn2.dataset.instruction;
+
+            const textToInsert = "\n" + newInstructionText;
+
+            if (currentFullText.trim() === "") {
+                // Si vide, insérer simplement
+                instructionsTextarea.value = textToInsert;
+            } else if (instruction1Data && currentFullText.endsWith("\n" + instruction1Data)) {
+                // Si le texte se termine par l'instruction 1, la remplacer par l'instruction 2
+                const baseText = currentFullText.substring(0, currentFullText.length - ( "\n" + instruction1Data).length);
+                instructionsTextarea.value = baseText + textToInsert;
+            } else if (currentFullText.endsWith("\n" + instruction2Data)) {
+                // Si le texte se termine déjà par l'instruction 2, la remplacer (pas de changement visible, mais correct)
+                const baseText = currentFullText.substring(0, currentFullText.length - ( "\n" + instruction2Data).length);
+                instructionsTextarea.value = baseText + textToInsert;
+            } else {
+                // Sinon, on ajoute
+                instructionsTextarea.value += textToInsert;
+            }
+        });
+    }
 });
