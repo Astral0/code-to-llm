@@ -8,6 +8,7 @@ from collections import defaultdict
 import pathspec
 import re
 import configparser
+import requests
 
 app = Flask(__name__, template_folder='templates', static_folder='static')
 
@@ -18,8 +19,16 @@ logging.basicConfig(level=logging.INFO)
 INSTRUCTION_TEXT_1 = "Ne fais rien, attends mes instructions." # Défaut
 INSTRUCTION_TEXT_2 = "Si des modifications du code source est nécessaire, tu dois présenter ta réponse sous la forme d'un fichier patch Linux. Considère que le fichier patch a été lancé depuis le répertoire du code-to-llm." # Défaut
 
+# --- Configuration du serveur LLM ---
+LLM_SERVER_URL = None
+LLM_SERVER_APIKEY = None
+LLM_SERVER_MODEL = None
+LLM_SERVER_ENABLED = False
+LLM_SERVER_API_TYPE = "openai" # Default to openai
+
 def load_config():
     global INSTRUCTION_TEXT_1, INSTRUCTION_TEXT_2
+    global LLM_SERVER_URL, LLM_SERVER_APIKEY, LLM_SERVER_MODEL, LLM_SERVER_ENABLED, LLM_SERVER_API_TYPE
     config = configparser.ConfigParser()
     try:
         if os.path.exists('config.ini'):
@@ -27,6 +36,19 @@ def load_config():
             INSTRUCTION_TEXT_1 = config.get('Instructions', 'instruction1_text', fallback=INSTRUCTION_TEXT_1)
             INSTRUCTION_TEXT_2 = config.get('Instructions', 'instruction2_text', fallback=INSTRUCTION_TEXT_2)
             app.logger.info("Configuration des instructions chargée depuis config.ini")
+
+            if 'LLMServer' in config:
+                LLM_SERVER_URL = config.get('LLMServer', 'url', fallback=None)
+                LLM_SERVER_APIKEY = config.get('LLMServer', 'apikey', fallback=None)
+                LLM_SERVER_MODEL = config.get('LLMServer', 'model', fallback=None)
+                LLM_SERVER_ENABLED = config.getboolean('LLMServer', 'enabled', fallback=False)
+                LLM_SERVER_API_TYPE = config.get('LLMServer', 'api_type', fallback='openai').lower()
+                if LLM_SERVER_ENABLED:
+                    app.logger.info(f"Configuration du serveur LLM chargée (Type: {LLM_SERVER_API_TYPE}).")
+                else:
+                    app.logger.info("Fonctionnalité LLM désactivée dans config.ini.")
+            else:
+                app.logger.info("Section [LLMServer] non trouvée dans config.ini. Fonctionnalité LLM désactivée.")
         else:
             app.logger.warning("config.ini non trouvé, utilisation des instructions par défaut.")
     except Exception as e:
@@ -376,7 +398,8 @@ def index():
     app.logger.info("Received request for '/' - Serving index.html")
     return render_template('index.html', 
                            instruction_text_1=INSTRUCTION_TEXT_1, 
-                           instruction_text_2=INSTRUCTION_TEXT_2)
+                           instruction_text_2=INSTRUCTION_TEXT_2,
+                           llm_feature_enabled=LLM_SERVER_ENABLED)
 
 @app.route('/upload', methods=['POST'])
 def upload_directory():
@@ -547,10 +570,102 @@ def generate_context():
 @app.route('/debug_gitignore', methods=['GET'])
 def debug_gitignore():
     """Endpoint to debug the application of .gitignore rules"""
-    return jsonify({
-        "ignored_patterns": analysis_cache.get("ignored_patterns", []),
-        "filtered_files_count": len(analysis_cache.get("uploaded_files", [])),
-    })
+    return jsonify(analysis_cache["ignored_patterns"])
+
+@app.route('/send_to_llm', methods=['POST'])
+def send_to_llm():
+    if not LLM_SERVER_ENABLED:
+        return jsonify({"error": "LLM feature is not enabled in config.ini"}), 400
+
+    if not all([LLM_SERVER_URL, LLM_SERVER_APIKEY, LLM_SERVER_MODEL]):
+        return jsonify({"error": "LLM server configuration is incomplete in config.ini"}), 400
+
+    data = request.get_json()
+    context_content = data.get('context')
+
+    app.logger.info(f"Dans /send_to_llm, LLM_SERVER_API_TYPE = {LLM_SERVER_API_TYPE}") # Log de diagnostic
+
+    if not context_content:
+        return jsonify({"error": "No context provided"}), 400
+
+    headers = {
+        "Content-Type": "application/json"
+    }
+    # Ajout conditionnel de l'en-tête Authorization
+    if LLM_SERVER_APIKEY and LLM_SERVER_API_TYPE != "ollama": # Ollama local n'a souvent pas besoin d'apikey via /api/chat
+        headers["Authorization"] = f"Bearer {LLM_SERVER_APIKEY}"
+
+    payload = {
+        "model": LLM_SERVER_MODEL,
+        "messages": [
+            {"role": "user", "content": context_content}
+        ]
+        # Vous pouvez ajouter d'autres paramètres ici si nécessaire (temperature, max_tokens, etc.)
+    }
+
+    target_url = LLM_SERVER_URL
+    if LLM_SERVER_API_TYPE == "ollama":
+        # S'assurer que l'URL ne se termine pas par un slash avant d'ajouter /api/chat
+        if target_url.endswith('/'):
+            target_url = target_url[:-1]
+        target_url += "/api/chat"
+        app.logger.info(f"Appel à l'API Ollama sur l'URL: {target_url}")
+
+    try:
+        response = requests.post(target_url, headers=headers, json=payload, timeout=120) # Timeout de 120 secondes
+        response.raise_for_status()  # Lèvera une exception pour les codes d'erreur HTTP 4xx/5xx
+        llm_response = response.json()
+        
+        content_to_return = ""
+        if LLM_SERVER_API_TYPE == "openai":
+            choices = llm_response.get("choices")
+            if choices and isinstance(choices, list) and len(choices) > 0:
+                message = choices[0].get("message")
+                if message and isinstance(message, dict):
+                    content_to_return = message.get("content", "")
+                else:
+                    app.logger.error(f"Format de message inattendu dans la réponse OpenAI: {message}")
+                    return jsonify({"error": "Unexpected message format in OpenAI API response", "details": llm_response}), 500
+            else:
+                app.logger.error(f"Tableau 'choices' manquant ou invalide dans la réponse OpenAI: {llm_response}")
+                return jsonify({"error": "Missing or invalid 'choices' in OpenAI API response", "details": llm_response}), 500
+        elif LLM_SERVER_API_TYPE == "ollama":
+            # Pour Ollama avec /api/chat (compatible OpenAI pour la requête)
+            # la réponse est typiquement: {"model": "...", "message": {"role": "assistant", "content": "..."} ...}
+            if llm_response.get("message") and llm_response["message"].get("content"):
+                content_to_return = llm_response["message"].get("content", "")
+            # Ollama peut aussi envoyer des réponses en streaming "done: false" puis "done: true"
+            # Si on reçoit une réponse partielle (cas non-streamé ici mais bon à savoir)
+            elif llm_response.get("response") and not llm_response.get("done"):
+                 # Ceci est pour le endpoint /api/generate, /api/chat est différent
+                 # Pour /api/chat, le message complet arrive quand done=true (implicite ici car on ne streame pas)
+                 app.logger.warning(f"Réponse partielle ou format inattendu d'Ollama (/api/chat devrait avoir message.content): {llm_response}")
+                 content_to_return = llm_response.get("response", "") # Fallback pour /api/generate
+            elif llm_response.get("response") and llm_response.get("done") is True:
+                content_to_return = llm_response.get("response", "") # Pour /api/generate
+            else:
+                app.logger.error(f"Réponse inattendue de l'API Ollama (/api/chat): {llm_response}")
+                return jsonify({"error": "Unexpected response format from Ollama API (/api/chat)", "details": llm_response}), 500
+        else:
+            app.logger.error(f"Type d'API LLM non supporté: {LLM_SERVER_API_TYPE}")
+            return jsonify({"error": f"Unsupported LLM API type: {LLM_SERVER_API_TYPE}"}), 400
+        
+        return jsonify({"response": content_to_return})
+
+    except requests.exceptions.HTTPError as http_err:
+        error_content = "No additional error content from server."
+        try:
+            error_content = http_err.response.json() # Essayer de parser le JSON de l'erreur
+        except ValueError: # Au cas où la réponse d'erreur n'est pas du JSON
+            error_content = http_err.response.text
+        app.logger.error(f"Erreur HTTP lors de l'appel à l'API LLM: {http_err}. Contenu: {error_content}")
+        return jsonify({"error": f"HTTP error calling LLM API: {str(http_err)}", "details": error_content}), http_err.response.status_code
+    except requests.exceptions.RequestException as e: # Erreurs plus générales (connexion, timeout, etc.)
+        app.logger.error(f"Erreur lors de l'appel à l'API LLM: {e}")
+        return jsonify({"error": f"Error calling LLM API: {str(e)}"}), 500
+    except Exception as e:
+        app.logger.error(f"Erreur inattendue lors du traitement de la réponse LLM: {e}")
+        return jsonify({"error": f"Unexpected error processing LLM response: {str(e)}"}), 500
 
 if __name__ == '__main__':
     app.run(host='127.0.0.1', port=5000, debug=True)

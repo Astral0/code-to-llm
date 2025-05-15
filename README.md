@@ -26,6 +26,11 @@ A tool for preparing code repositories for LLM analysis and modification. Create
 - **Context Regeneration**: Easily regenerate the context. If files have been modified, you'll be guided to re-select the directory to ensure all changes are captured, while your previous file selection is preserved.
 - **Secret Masking Toggle**: Enable or disable sensitive data masking directly from the UI.
 - **Copy to Clipboard**: Quickly copy the generated Markdown context.
+- **LLM Integration (Configurable)**:
+  - Send the generated context directly to a configured LLM API (OpenAI compatible or Ollama).
+  - View the LLM's response directly in the interface.
+  - Copy the LLM's response to the clipboard.
+  - Configuration via `config.ini` for API endpoint, key, model, and API type.
 
 ## ⚙️ Installation
 
@@ -44,12 +49,20 @@ cd code-to-llm
 pip install -r requirements.txt
 ```
 
-The web interface allows for configuration of predefined instruction templates via a `config.ini` file at the root of the project. See the `config.ini.example` (if provided) or the following structure:
+The web interface allows for configuration of predefined instruction templates and LLM server settings via a `config.ini` file at the root of the project. 
+Create `config.ini` from `config.ini.template` and customize it:
 
 ```ini
 [Instructions]
 instruction1_text = Your first predefined instruction.
 instruction2_text = Your second predefined instruction.
+
+[LLMServer]
+url = YOUR_LLM_API_URL_HERE # e.g., https://api.openai.com/v1/chat/completions or http://localhost:11434
+apikey = YOUR_LLM_API_KEY_HERE # Optional for local Ollama, required for OpenAI
+model = YOUR_LLM_MODEL_HERE   # e.g., gpt-3.5-turbo or llama3
+api_type = openai             # 'openai' or 'ollama'
+enabled = false               # Set to true to enable LLM interaction features
 ```
 
 ### Web Interface

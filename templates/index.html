@@ -131,6 +131,26 @@
               <i class="far fa-copy"></i> Copy
             </button>
           </div>
+          {% if llm_feature_enabled %}
+          <div id="llmInteractionSection" class="mt-3">
+            <button id="sendToLlmBtn" class="btn btn-info" title="Envoyer le contexte au LLM configuré">
+              <i class="fas fa-paper-plane"></i> Envoyer au LLM
+            </button>
+            <div id="llm-spinner" class="spinner-border spinner-border-sm text-info ms-2 visually-hidden" role="status">
+              <span class="visually-hidden">Envoi au LLM...</span>
+            </div>
+            <div id="llmResponseArea" class="mt-3 visually-hidden">
+              <h5><i class="fas fa-robot text-info"></i> Réponse du LLM:</h5>
+              <div id="llm-error" class="alert alert-danger p-2 visually-hidden" role="alert" style="font-size: 0.9em;"></div>
+              <div class="position-relative">
+                <textarea id="llmResponseOutput" class="form-control bg-light" rows="10" readonly style="font-family: var(--bs-font-monospace); font-size: 0.85em; white-space: pre-wrap;"></textarea>
+                <button id="copyLlmResponseBtn" class="btn btn-sm btn-outline-secondary position-absolute top-0 end-0 m-2" title="Copier la réponse du LLM">
+                  <i class="far fa-copy"></i> Copier
+                </button>
+              </div>
+            </div>
+          </div>
+          {% endif %}
         </div>
       </div>
     </section>
@@ -142,5 +162,86 @@
   
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script>
   <script src="{{ url_for('static', filename='script.js') }}"></script>
+  {% if llm_feature_enabled %}
+  <script>
+    // Logique pour l'interaction avec le LLM
+    const sendToLlmBtn = document.getElementById('sendToLlmBtn');
+    const llmResponseArea = document.getElementById('llmResponseArea');
+    const llmResponseOutput = document.getElementById('llmResponseOutput');
+    const markdownOutput = document.getElementById('markdownOutput'); // Référence au textarea du contexte
+    const llmSpinner = document.getElementById('llm-spinner');
+    const llmError = document.getElementById('llm-error');
+
+    const copyLlmResponseBtn = document.getElementById('copyLlmResponseBtn');
+
+    if (sendToLlmBtn) {
+      sendToLlmBtn.addEventListener('click', async () => {
+        const context = markdownOutput.value;
+        if (!context.trim()) {
+          alert('Le contexte Markdown est vide. Veuillez d\'abord générer un contexte.');
+          return;
+        }
+
+        llmResponseArea.classList.add('visually-hidden');
+        llmResponseOutput.value = ''; // Clear previous response
+        llmError.classList.add('visually-hidden');
+        llmError.textContent = '';
+        llmSpinner.classList.remove('visually-hidden');
+        sendToLlmBtn.disabled = true;
+
+        try {
+          const response = await fetch('/send_to_llm', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ context: context }),
+          });
+
+          const result = await response.json();
+
+          if (response.ok) {
+            llmResponseOutput.value = result.response || "Le LLM n\'a pas retourné de contenu.";
+            llmResponseArea.classList.remove('visually-hidden');
+          } else {
+            llmError.textContent = result.error || 'Une erreur inconnue est survenue lors de la communication avec le LLM.';
+            if (result.details) {
+                llmError.textContent += ` Détails: ${typeof result.details === 'object' ? JSON.stringify(result.details) : result.details}`;
+            }
+            llmError.classList.remove('visually-hidden');
+          }
+        } catch (error) {
+          console.error('Erreur lors de l\'envoi au LLM:', error);
+          llmError.textContent = 'Erreur de communication avec le serveur: ' + error.message;
+          llmError.classList.remove('visually-hidden');
+        } finally {
+          llmSpinner.classList.add('visually-hidden');
+          sendToLlmBtn.disabled = false;
+        }
+      });
+    }
+
+    if (copyLlmResponseBtn) {
+      copyLlmResponseBtn.addEventListener('click', () => {
+        llmResponseOutput.select(); // Sélectionne le contenu du textarea
+        document.execCommand('copy'); // Copie dans le presse-papiers (méthode classique)
+        // Alternative moderne (mais attention à la compatibilité et aux permissions) :
+        // navigator.clipboard.writeText(llmResponseOutput.value).then(() => {
+        //   alert('Réponse du LLM copiée dans le presse-papiers!');
+        // }).catch(err => {
+        //   console.error('Erreur lors de la copie de la réponse LLM:', err);
+        //   alert('Impossible de copier la réponse.');
+        // });
+        
+        // Petit retour visuel temporaire (optionnel)
+        const originalText = copyLlmResponseBtn.innerHTML;
+        copyLlmResponseBtn.innerHTML = '<i class="fas fa-check"></i> Copié!';
+        setTimeout(() => {
+          copyLlmResponseBtn.innerHTML = originalText;
+        }, 2000);
+      });
+    }
+  </script>
+  {% endif %}
 </body>
 </html>
