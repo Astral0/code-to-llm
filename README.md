@@ -31,6 +31,7 @@ A tool for preparing code repositories for LLM analysis and modification. Create
   - View the LLM's response directly in the interface.
   - Chat with the LLM with conversation history.
   - LLM responses are rendered as Markdown in the chat.
+  - Quickly append predefined instructions (e.g., for generating patches) to your chat messages.
   - Copy the LLM's response to the clipboard.
   - Configuration via `config.ini` for API endpoint, key, model, API type, and streaming.
 

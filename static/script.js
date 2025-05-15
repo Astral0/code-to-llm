@@ -33,6 +33,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const llmErrorChat = document.getElementById('llm-error-chat');
     const llmChatSpinner = document.getElementById('llm-chat-spinner');
+    const appendPatchToChatBtn = document.getElementById('appendPatchToChatBtn');
 
     // --- State variables ---
     let currentFilesData = []; // Will store uploaded files (object with name, full relative path and content)
@@ -722,6 +723,21 @@ document.addEventListener('DOMContentLoaded', () => {
         
         chatMessageInput.addEventListener('input', () => adjustTextareaHeight(chatMessageInput));
         adjustTextareaHeight(chatMessageInput); // Ajuster initialement si du texte est déjà présent (peu probable ici)
+    }
+
+    // --- Logique pour le bouton "Ajouter Instruction Patch" ---
+    if (appendPatchToChatBtn && chatMessageInput) {
+        appendPatchToChatBtn.addEventListener('click', () => {
+            const patchInstruction = appendPatchToChatBtn.dataset.instruction;
+            if (patchInstruction) {
+                const currentMessage = chatMessageInput.value;
+                // Ajouter un saut de ligne si le message n'est pas vide et ne se termine pas déjà par un saut de ligne
+                const prefix = currentMessage.trim() !== '' && !currentMessage.endsWith('\n') ? '\n' : '';
+                chatMessageInput.value = currentMessage + prefix + patchInstruction;
+                adjustTextareaHeight(chatMessageInput);
+                chatMessageInput.focus(); // Remettre le focus sur le textarea
+            }
+        });
     }
     
     // Assurer que les références DOM pour le chat sont bien définies au début de DOMContentLoaded
