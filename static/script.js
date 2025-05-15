@@ -81,27 +81,39 @@ document.addEventListener('DOMContentLoaded', () => {
             messageDiv.classList.add('chat-bubble');
         }
         
-        let processedContent = content;
-        if (content) { // Ne pas traiter si le contenu initial est vide (pour le streaming)
-            processedContent = content.replace(/```([a-zA-Z]*)\\n([\\s\\S]*?)\\n```/g, 
-                (match, lang, code) => `<div class=\"code-block-wrapper\"><pre><code class=\"language-${lang || 'plaintext'}\">${escapeHtml(code.trim())}</code></pre></div>`);
-            processedContent = processedContent.replace(/\\n/g, '<br>');
+        let processedContent = "";
+        if (content) {
+            if (role === 'assistant') {
+                // Utiliser Marked.js pour le contenu de l'assistant
+                // Assurez-vous que Marked.js est chargé (par exemple, via CDN dans index.html)
+                if (typeof marked !== 'undefined') {
+                    processedContent = marked.parse(content);
+                } else {
+                    console.warn("Marked.js n'est pas chargé. Affichage du Markdown brut.");
+                    processedContent = escapeHtml(content).replace(/\\n/g, '<br>'); // Fallback simple
+                }
+            } else if (role === 'user') {
+                // Pour les messages utilisateur, échapper le HTML et convertir les sauts de ligne
+                processedContent = escapeHtml(content).replace(/\\n/g, '<br>');
+            } else { // system-error ou autres
+                processedContent = escapeHtml(content).replace(/\\n/g, '<br>');
+            }
         }
         
         messageDiv.innerHTML = processedContent;
 
-        if (role === 'assistant' && !existingDiv) { // Ajouter le bouton copier seulement à la création
+        // Le bouton copier doit toujours utiliser le contenu brut (non-HTML) pour l'assistant
+        let rawContentForCopy = content; 
+
+        if (role === 'assistant' && !existingDiv) {
             const copyBtnElement = document.createElement('button');
             copyBtnElement.innerHTML = '<i class="far fa-copy"></i>';
             copyBtnElement.classList.add('btn', 'btn-sm', 'btn-outline-secondary', 'copy-chat-btn');
             copyBtnElement.title = 'Copier ce message';
             
-            // Le contenu à copier sera mis à jour dynamiquement pour le streaming
-            let contentToCopy = content; 
-            
             copyBtnElement.onclick = () => {
-                // S'assurer de copier le contenu final si streamé
-                const finalContent = messageDiv.dataset.finalContent || contentToCopy; 
+                // S'assurer de copier le contenu final brut si streamé
+                const finalContent = messageDiv.dataset.finalRawContent || rawContentForCopy; 
                 navigator.clipboard.writeText(finalContent).then(() => {
                     const originalIcon = copyBtnElement.innerHTML;
                     copyBtnElement.innerHTML = '<i class="fas fa-check text-success"></i>';
@@ -585,16 +597,14 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (done) {
                         chatHistory.push({ role: 'assistant', content: accumulatedContent });
                         if (currentAssistantMessageDiv) {
-                             // Stocker le contenu final pour le bouton copier
-                            currentAssistantMessageDiv.dataset.finalContent = accumulatedContent;
-                            // Potentiellement re-render avec le formatage Markdown complet si nécessaire ici
-                            // Pour l'instant, le formatage est appliqué au fur et à mesure.
+                             // Stocker le contenu final brut pour le bouton copier
+                            currentAssistantMessageDiv.dataset.finalRawContent = accumulatedContent;
+                            // La mise à jour de innerHTML avec marked.parse se fera à chaque chunk
                         }
                         break;
                     }
 
                     const chunk = decoder.decode(value, { stream: true });
-                    // Les événements SSE sont séparés par \\n\\n. Un chunk peut en contenir plusieurs.
                     const lines = chunk.split('\\n\\n');
                     for (const line of lines) {
                         if (line.startsWith("data: ")) {
@@ -604,9 +614,7 @@ document.addEventListener('DOMContentLoaded', () => {
                                     const parsedData = JSON.parse(jsonData);
                                     if (parsedData.type === 'content' && parsedData.content) {
                                         accumulatedContent += parsedData.content;
-                                        // Mettre à jour la bulle de l'assistant de manière incrémentale
-                                        // Le re-formatage à chaque chunk peut être coûteux,
-                                        // mais pour l'instant on le fait pour la simplicité visuelle.
+                                        // Mettre à jour la bulle avec le contenu Markdown parsé
                                         appendMessageToChat('assistant', accumulatedContent, currentAssistantMessageDiv);
                                     } else if (parsedData.type === 'done') {
                                         console.log("Stream: Done event received from server.");
@@ -626,10 +634,10 @@ document.addEventListener('DOMContentLoaded', () => {
             } else {
                 // Gestion non-streamée (existante)
                 const result = await response.json();
-                if (result.response) { // Si la réponse non-streamée a réussi
+                if (result.response) { 
                     chatHistory.push({ role: 'assistant', content: result.response });
                     appendMessageToChat('assistant', result.response);
-                } else if (result.error) { // Si la réponse non-streamée est une erreur JSON structurée
+                } else if (result.error) { 
                     const errorMsg = result.error + (result.details ? ` Détails: ${typeof result.details === 'object' ? JSON.stringify(result.details) : result.details}` : '');
                     appendMessageToChat('system-error', `Erreur de l'assistant: ${errorMsg}`);
                     llmErrorChat.textContent = errorMsg;

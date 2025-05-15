@@ -29,8 +29,10 @@ A tool for preparing code repositories for LLM analysis and modification. Create
 - **LLM Integration (Configurable)**:
   - Send the generated context directly to a configured LLM API (OpenAI compatible or Ollama).
   - View the LLM's response directly in the interface.
+  - Chat with the LLM with conversation history.
+  - LLM responses are rendered as Markdown in the chat.
   - Copy the LLM's response to the clipboard.
-  - Configuration via `config.ini` for API endpoint, key, model, and API type.
+  - Configuration via `config.ini` for API endpoint, key, model, API type, and streaming.
 
 ## ⚙️ Installation
 
