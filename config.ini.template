@@ -1,0 +1,9 @@
+[Instructions]
+instruction1_text = Ne fais rien, attends mes instructions.
+instruction2_text = Si des modifications du code source est nécessaire, tu dois présenter ta réponse sous la forme d'un fichier patch Linux. Considère que le fichier patch a été lancé depuis le répertoire du code-to-llm.
+
+[LLMServer]
+url = YOUR_LLM_API_URL_HERE
+apikey = YOUR_LLM_API_KEY_HERE
+model = YOUR_LLM_MODEL_HERE
+enabled = false 
