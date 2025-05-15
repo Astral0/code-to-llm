@@ -1,5 +1,5 @@
 # web_server.py
-from flask import Flask, request, jsonify, render_template
+from flask import Flask, request, jsonify, render_template, Response
 import sys
 import os
 import logging
@@ -9,6 +9,7 @@ import pathspec
 import re
 import configparser
 import requests
+import json
 
 app = Flask(__name__, template_folder='templates', static_folder='static')
 
@@ -25,10 +26,11 @@ LLM_SERVER_APIKEY = None
 LLM_SERVER_MODEL = None
 LLM_SERVER_ENABLED = False
 LLM_SERVER_API_TYPE = "openai" # Default to openai
+LLM_SERVER_STREAM_RESPONSE = False # Nouvelle variable globale
 
 def load_config():
     global INSTRUCTION_TEXT_1, INSTRUCTION_TEXT_2
-    global LLM_SERVER_URL, LLM_SERVER_APIKEY, LLM_SERVER_MODEL, LLM_SERVER_ENABLED, LLM_SERVER_API_TYPE
+    global LLM_SERVER_URL, LLM_SERVER_APIKEY, LLM_SERVER_MODEL, LLM_SERVER_ENABLED, LLM_SERVER_API_TYPE, LLM_SERVER_STREAM_RESPONSE
     config = configparser.ConfigParser()
     try:
         if os.path.exists('config.ini'):
@@ -43,8 +45,9 @@ def load_config():
                 LLM_SERVER_MODEL = config.get('LLMServer', 'model', fallback=None)
                 LLM_SERVER_ENABLED = config.getboolean('LLMServer', 'enabled', fallback=False)
                 LLM_SERVER_API_TYPE = config.get('LLMServer', 'api_type', fallback='openai').lower()
+                LLM_SERVER_STREAM_RESPONSE = config.getboolean('LLMServer', 'stream_response', fallback=False)
                 if LLM_SERVER_ENABLED:
-                    app.logger.info(f"Configuration du serveur LLM chargée (Type: {LLM_SERVER_API_TYPE}).")
+                    app.logger.info(f"Configuration du serveur LLM chargée (Type: {LLM_SERVER_API_TYPE}, Streaming: {LLM_SERVER_STREAM_RESPONSE}).")
                 else:
                     app.logger.info("Fonctionnalité LLM désactivée dans config.ini.")
             else:
@@ -309,7 +312,7 @@ def build_uploaded_context_string(uploaded_files, root_name="Uploaded_Directory"
     
     # For each file, add the formatted content
     total_secrets_masked = 0
-    files_with_secrets = 0
+    files_with_secrets_list = []
     
     for file_obj in sorted(uploaded_files, key=lambda f: f["path"]):
         relative_path = file_obj["path"]
@@ -317,61 +320,56 @@ def build_uploaded_context_string(uploaded_files, root_name="Uploaded_Directory"
         footer_file = f"--- END FILE: {relative_path} ---\n\n"
         lang = detect_language(relative_path)
         
-        # Récupérer le contenu et appliquer le masquage des secrets
         content = file_obj["content"].rstrip()
         
-        # Détecter et masquer les secrets si le masquage est activé
         redacted_content = content
-        secrets_count = 0
-        regex_secrets_count = 0
+        secrets_count_ds = 0
+        secrets_count_regex = 0
         
         if enable_masking:
-            # Détecter et masquer les secrets avec detect-secrets
-            redacted_content, secrets_count = detect_and_redact_secrets(content, relative_path, mask_mode)
-            
-            # Appliquer des règles supplémentaires basées sur regex pour les cas non détectés
-            redacted_content, regex_secrets_count = detect_and_redact_with_regex(redacted_content, relative_path)
+            redacted_content, secrets_count_ds = detect_and_redact_secrets(content, relative_path, mask_mode)
+            # Apply regex on potentially already redacted content if first pass found something.
+            # Or on original if first pass found nothing.
+            final_redacted_content, secrets_count_regex = detect_and_redact_with_regex(redacted_content, relative_path)
+            if secrets_count_regex > 0 : # if regex found new things
+                 redacted_content = final_redacted_content
+
+        current_file_secrets_masked = secrets_count_ds + secrets_count_regex
+        if current_file_secrets_masked > 0:
+            app.logger.info(f"Masked {current_file_secrets_masked} secrets in {relative_path}")
+            if relative_path not in files_with_secrets_list:
+                 files_with_secrets_list.append(relative_path)
+            total_secrets_masked += current_file_secrets_masked
         
-        # Mise à jour des statistiques de masquage
-        total_masked = secrets_count + regex_secrets_count
-        if total_masked > 0:
-            app.logger.info(f"Masked {total_masked} secrets in {relative_path}")
-            files_with_secrets += 1
-            total_secrets_masked += total_masked
+        content_to_use = redacted_content
         
-        # Utiliser le contenu masqué si des secrets ont été détectés
-        content = redacted_content if total_masked > 0 else content
-        
-        # Formater avec le bloc de code approprié
         if lang:
-            formatted_content = f"```{lang}\n{content}\n```\n"
+            formatted_content = f"```{lang}\n{content_to_use}\n```\n"
         else:
-            formatted_content = content + "\n"
+            formatted_content = content_to_use + "\n"
         context_parts.append(header_file + formatted_content + footer_file)
     
-    # Ajouter les instructions à la fin du contexte si elles sont fournies
     if instructions:
         instructions_part = "\n--- INSTRUCTIONS ---\n" + instructions + "\n--- END INSTRUCTIONS ---\n"
         context_parts.append(instructions_part)
     
-    # Join all parts to form the context
     full_context = "".join(context_parts)
     
-    # Calculate statistics for the summary to be returned separately
-    char_count, estimated_tokens = estimate_tokens(full_context)
-    model_compatibility = get_model_compatibility(estimated_tokens)
+    char_count_val, estimated_tokens_val = estimate_tokens(full_context)
+    model_compatibility_val = get_model_compatibility(estimated_tokens_val)
     
-    # Generate the summary separately with information about masked secrets
     summary = {
-        "files_count": len(uploaded_files),
-        "char_count": char_count,
-        "estimated_tokens": int(estimated_tokens),
-        "model_compatibility": model_compatibility,
+        "total_files": len(analysis_cache.get("uploaded_files", [])),
+        "included_files_count": len(uploaded_files),
+        "excluded_files_count": len(analysis_cache.get("uploaded_files", [])) - len(uploaded_files),
+        "total_lines": sum(f["content"].count('\n') for f in uploaded_files),
+        "total_chars": char_count_val,
+        "estimated_tokens": int(estimated_tokens_val),
+        "model_compatibility": model_compatibility_val,
         "secrets_masked": total_secrets_masked,
-        "files_with_secrets": files_with_secrets
+        "files_with_secrets": files_with_secrets_list
     }
     
-    # Return the context and the summary separately
     return full_context, summary
 
 def should_ignore_path(path, spec):
@@ -387,14 +385,19 @@ def should_ignore_path(path, spec):
     # 2. Check if the path contains a directory that is ignored
     parts = path.split('/')
     for i in range(1, len(parts)):
-        partial_path = '/'.join(parts[:i]) + '/'
-        if spec.match_file(partial_path):
-            app.logger.debug(f"File ignored (parent directory ignored): {path}, ignored portion: {partial_path}")
+        partial_path_as_dir = '/'.join(parts[:i]) + '/'
+        if spec.match_file(partial_path_as_dir):
+            app.logger.debug(f"File ignored (parent directory ignored): {path}, ignored portion: {partial_path_as_dir}")
             return True
-    
-    # 3. Check specific patterns such as __pycache__
+        # Also check without trailing slash if some patterns might be defined like that
+        partial_path_as_file_prefix = '/'.join(parts[:i])
+        if spec.match_file(partial_path_as_file_prefix) and any(p.pattern.endswith('/') for p in spec.patterns if partial_path_as_file_prefix == p.pattern.rstrip('/')):
+             app.logger.debug(f"File ignored (parent directory pattern match): {path}, ignored portion: {partial_path_as_file_prefix}")
+             return True
+
+    # 3. Check specific patterns such as __pycache__ (already covered if in .gitignore, but good fallback)
     if '__pycache__' in path:
-        app.logger.debug(f"File ignored (pattern __pycache__): {path}")
+        app.logger.debug(f"File ignored (hardcoded pattern __pycache__): {path}")
         return True
     
     return False
@@ -407,7 +410,8 @@ def index():
     return render_template('index.html', 
                            instruction_text_1=INSTRUCTION_TEXT_1, 
                            instruction_text_2=INSTRUCTION_TEXT_2,
-                           llm_feature_enabled=LLM_SERVER_ENABLED)
+                           llm_feature_enabled=LLM_SERVER_ENABLED,
+                           llm_stream_response_enabled=LLM_SERVER_STREAM_RESPONSE)
 
 @app.route('/upload', methods=['POST'])
 def upload_directory():
@@ -455,7 +459,7 @@ def upload_directory():
         '.git/',
         '__pycache__/',
         '*.pyc',
-        '.gitignore'
+        # '.gitignore' # .gitignore itself should not be ignored for parsing, but not included in context
     ]
     
     all_patterns = default_patterns.copy()
@@ -469,261 +473,280 @@ def upload_directory():
     try:
         spec = pathspec.PathSpec.from_lines(GitWildMatchPattern, all_patterns)
         app.logger.info(f".gitignore loaded with {len(spec.patterns)} rules.")
-        # Store patterns for debugging
         analysis_cache["ignored_patterns"] = all_patterns
     except Exception as e:
         app.logger.error(f"Error loading .gitignore: {e}")
-        spec = pathspec.PathSpec([])
+        spec = pathspec.PathSpec([]) # fallback to empty spec
         analysis_cache["ignored_patterns"] = []
 
     # Filter files by excluding those that match the .gitignore rules (applied on the relative POSIX path)
     filtered_files = []
-    ignored_files = []
+    ignored_files_paths = [] # Store paths of ignored files for logging
     
+    # Ensure .gitignore itself is not included in the context even if not explicitly in patterns
+    # (it's used for rules, not usually for LLM context directly unless specified)
+    # However, our current logic would select it if user checks it.
+    # For now, we let the user decide. `default_patterns` could include '.gitignore' to force exclusion.
+
     for file_obj in uploaded_files:
-        path = file_obj["path"]
-        if should_ignore_path(path, spec):
-            ignored_files.append(path)
+        path_to_check = file_obj["path"]
+        # Special handling for .gitignore itself: always parse it, but exclude from final list for context generation
+        if path_to_check.lower() == ".gitignore":
+            if path_to_check not in ignored_files_paths:
+                 ignored_files_paths.append(path_to_check) # Log as "ignored" for context
+            continue # Skip adding .gitignore to filtered_files
+
+        if should_ignore_path(path_to_check, spec):
+            if path_to_check not in ignored_files_paths:
+                ignored_files_paths.append(path_to_check)
         else:
             filtered_files.append(file_obj)
     
-    app.logger.info(f"Ignored files ({len(ignored_files)}): {', '.join(ignored_files[:10])}{'...' if len(ignored_files) > 10 else ''}")
-    app.logger.info(f"Upload successful: {len(filtered_files)} files kept after applying .gitignore.")
+    app.logger.info(f"Ignored files for context ({len(ignored_files_paths)}): {', '.join(ignored_files_paths[:10])}{'...' if len(ignored_files_paths) > 10 else ''}")
+    app.logger.info(f"Upload successful: {len(filtered_files)} files kept for selection after applying .gitignore rules.")
     
-    # Update the cache
-    analysis_cache["uploaded_files"] = filtered_files
+    analysis_cache["uploaded_files"] = filtered_files # Store only files available for selection
 
-    # Prepare data for the client-side tree
-    file_tree_data = []
-    for file_obj in filtered_files:
-        rel_path = file_obj["path"]
-        file_tree_data.append({
-            "path": rel_path
-        })
+    file_tree_data = [{"path": f["path"]} for f in filtered_files] # Data for client-side tree
     
     return jsonify({
         "success": True, 
-        "files": file_tree_data,
+        "files": file_tree_data, # Files to display in tree
         "debug": {
-            "ignored_patterns": analysis_cache["ignored_patterns"],
-            "ignored_files_count": len(ignored_files),
-            "filtered_files_count": len(filtered_files)
+            "ignored_patterns_used": analysis_cache["ignored_patterns"],
+            "ignored_files_log": ignored_files_paths, # Log of files ignored
+            "final_selectable_files_count": len(filtered_files)
         }
     })
 
 @app.route('/generate', methods=['POST'])
 def generate_context():
-    """
-    Endpoint to generate the Markdown context from the uploaded files.
-    Expects a JSON of the form:
-    {
-       "selected_files": ["folder/file1.py", "folder/subfolder/file2.js", ...],
-       "masking_options": {
-           "enable_masking": true,
-           "mask_mode": "mask"  // ou "remove" pour supprimer les lignes complètes
-       },
-       "instructions": "Ne fais rien, attends mes instructions."
-    }
-    Returns the Markdown context AND a separate summary with statistics.
-    """
     if not request.is_json:
         return jsonify({"success": False, "error": "Invalid request format: JSON expected."}), 400
     data = request.get_json()
     if not data or "selected_files" not in data or not isinstance(data["selected_files"], list):
         return jsonify({"success": False, "error": "Missing or invalid selected files list."}), 400
     
-    # Récupérer les options de masquage
     masking_options = data.get("masking_options", {})
-    enable_masking = masking_options.get("enable_masking", True)  # Activé par défaut
-    mask_mode = masking_options.get("mask_mode", "mask")  # 'mask' ou 'remove'
+    enable_masking = masking_options.get("enable_masking", True)
+    mask_mode = masking_options.get("mask_mode", "mask")
     
-    # Récupérer les instructions personnalisées
-    # Si les instructions envoyées sont une chaîne vide, les garder vides, sinon utiliser une chaîne vide par défaut.
-    instructions = data.get("instructions") # Peut être None ou une chaîne vide
-    if instructions is None: # Si la clé n'est pas là (ne devrait pas arriver si le front envoie toujours qqch)
-        instructions = "" # Ou une autre valeur par défaut si vous préférez, mais vide est plus logique ici
+    instructions = data.get("instructions", "")
     
     app.logger.info(f"Secret masking: {'enabled' if enable_masking else 'disabled'}, mode: {mask_mode}")
-    app.logger.info(f"Instructions reçues: {instructions[:100]}...") # Log des instructions
+    app.logger.info(f"Instructions reçues: {instructions[:100]}{'...' if len(instructions) > 100 else ''}")
     
     selected_paths = data["selected_files"]
-    uploaded_files = analysis_cache.get("uploaded_files", [])
-    if not uploaded_files:
-        return jsonify({"success": False, "error": "No uploaded file found. Please re-upload the directory."}), 400
+    # analysis_cache["uploaded_files"] now contains only non-ignored files
+    all_selectable_files = analysis_cache.get("uploaded_files", []) 
     
-    # Filter uploaded files based on the selected paths
-    selected_files = [f for f in uploaded_files if f["path"] in selected_paths]
-    if not selected_files:
-        return jsonify({"success": False, "error": "No valid file selected."}), 400
+    if not all_selectable_files and selected_paths : # Check if selectable files list is empty but user selected some (should not happen)
+         app.logger.warning("User selected files, but the list of selectable files is empty. Re-analyze might be needed.")
+         # Potentially could re-trigger analysis or send specific error.
+         # For now, assume this implies an issue if selected_paths is not empty.
+
+    # Filter uploaded files based on the selected paths by user
+    context_files = [f for f in all_selectable_files if f["path"] in selected_paths]
+    if not context_files: # No files selected or selection is empty
+        # check if selected_paths was non-empty, means selection led to 0 files from selectable ones
+        if selected_paths: 
+             app.logger.warning(f"User selected paths {selected_paths}, but these did not match any available selectable files.")
+        return jsonify({"success": False, "error": "No files selected or selection did not match available files."}), 400
         
-    # Passer les options de masquage à la fonction de génération de contexte
-    
-    # Generate the context and summary separately
     markdown_context, summary = build_uploaded_context_string(
-        uploaded_files=selected_files,
+        uploaded_files=context_files, # Use the user-selected files
         root_name="Uploaded_Directory",
         enable_masking=enable_masking,
         mask_mode=mask_mode,
         instructions=instructions
     )
     
-    
     return jsonify({
         "success": True, 
         "markdown": markdown_context,
-        "summary": summary
+        "summary": summary # Summary is now more detailed
     })
 
-# Route to debug .gitignore rules 
 @app.route('/debug_gitignore', methods=['GET'])
 def debug_gitignore():
-    """Endpoint to debug the application of .gitignore rules"""
-    return jsonify(analysis_cache["ignored_patterns"])
+    return jsonify(analysis_cache.get("ignored_patterns", []))
 
 @app.route('/send_to_llm', methods=['POST'])
 def send_to_llm():
     if not LLM_SERVER_ENABLED:
         return jsonify({"error": "LLM feature is not enabled in config.ini"}), 400
 
-    # Vérifier si les paramètres essentiels sont là, en tenant compte qu'Ollama n'a pas besoin d'apikey
-    if not LLM_SERVER_URL or not LLM_SERVER_MODEL or (LLM_SERVER_API_TYPE != "ollama" and not LLM_SERVER_APIKEY):
+    if not LLM_SERVER_URL or not LLM_SERVER_MODEL or \
+       (LLM_SERVER_API_TYPE != "ollama" and not LLM_SERVER_APIKEY):
         app.logger.error(f"LLM server configuration incomplete. URL: {LLM_SERVER_URL}, Model: {LLM_SERVER_MODEL}, APIKey set: {bool(LLM_SERVER_APIKEY)}, Type: {LLM_SERVER_API_TYPE}")
         return jsonify({"error": "LLM server configuration is incomplete in config.ini"}), 400
 
     data = request.get_json()
     messages_history = data.get('messages')
-    app.logger.info(f"Dans /send_to_llm, LLM_SERVER_API_TYPE = {LLM_SERVER_API_TYPE}")
-    # Limiter la taille du log pour l'historique des messages
+
+    app.logger.info(f"Dans /send_to_llm, LLM_SERVER_API_TYPE = {LLM_SERVER_API_TYPE}, Streaming: {LLM_SERVER_STREAM_RESPONSE}")
     if messages_history and len(messages_history) > 0:
-        log_msg_content = messages_history[-1]['content'] # Log only last message content for brevity
-        app.logger.info(f"Dernier message de l'historique ({messages_history[-1]['role']}): {log_msg_content[:200]}{'...' if len(log_msg_content)>200 else ''}")
+        log_msg_content = messages_history[-1]['content']
+        app.logger.info(f"Dernier message ({messages_history[-1]['role']}): {log_msg_content[:150]}{'...' if len(log_msg_content)>150 else ''}")
     else:
-        app.logger.warning("Aucun historique de messages reçu.")
+        app.logger.warning("Aucun historique de messages reçu pour /send_to_llm.")
+        return jsonify({"error": "No messages provided"}), 400 # No messages, so error
 
-
-    if not messages_history or not isinstance(messages_history, list) or len(messages_history) == 0:
-        return jsonify({"error": "No messages provided"}), 400
-
-    headers = {
-        "Content-Type": "application/json"
-    }
+    headers = {"Content-Type": "application/json"}
     if LLM_SERVER_APIKEY and LLM_SERVER_API_TYPE != "ollama":
         headers["Authorization"] = f"Bearer {LLM_SERVER_APIKEY}"
 
     payload = {
         "model": LLM_SERVER_MODEL,
-        "messages": messages_history
+        "messages": messages_history,
+        "stream": LLM_SERVER_STREAM_RESPONSE # Global stream setting
     }
-    if LLM_SERVER_API_TYPE == "ollama":
-        payload["stream"] = False # Pour Ollama /api/chat, s'assurer que stream est false
+
+    # Specific handling for Ollama if not streaming (as it has a slightly different non-stream payload expectation sometimes)
+    # If streaming is globally enabled, we assume Ollama supports the OpenAI-compatible stream format.
+    if LLM_SERVER_API_TYPE == "ollama" and not LLM_SERVER_STREAM_RESPONSE:
+        # Ollama's non-streaming /api/chat doesn't need "stream":false if it's the default.
+        # However, to be explicit if we were to add other ollama specific non-stream params, this is where they'd go.
+        # For now, just removing "stream" if it was added and global stream is false.
+        if "stream" in payload and not payload["stream"]: # if stream:false was set by global default
+             del payload["stream"] # Ollama might not like stream:false explicitly on non-stream endpoint for /api/chat
 
     target_url = LLM_SERVER_URL
+    # URL normalization logic (déjà revue et corrigée)
     if LLM_SERVER_API_TYPE == "ollama":
-        # Normaliser l'URL en supprimant les slashes de fin potentiels
         normalized_url = target_url.rstrip('/')
         ollama_suffix = "api/chat"
-        openai_compatible_suffix = "v1/chat/completions" # Pour Ollama en mode compatibilité OpenAI
-
-        if normalized_url.endswith(ollama_suffix) or normalized_url.endswith(openai_compatible_suffix):
-            target_url = normalized_url # L'URL est déjà complète avec un suffixe connu
-        else:
-            # Par défaut, ajouter /api/chat si aucun suffixe connu n'est présent et que l'URL ne semble pas déjà le contenir
-            # Cela suppose que si l'URL ne se termine pas par ces suffixes, elle est une URL de base.
+        openai_compatible_suffix = "v1/chat/completions"
+        if not (normalized_url.endswith(ollama_suffix) or normalized_url.endswith(openai_compatible_suffix)):
             target_url = f"{normalized_url}/{ollama_suffix}"
+        else:
+            target_url = normalized_url
         app.logger.info(f"Appel à l'API Ollama sur l'URL: {target_url}")
     elif LLM_SERVER_API_TYPE == "openai":
-        # Normaliser l'URL en supprimant les slashes de fin potentiels
         normalized_url = target_url.rstrip('/')
         openai_suffix = "v1/chat/completions"
-        
-        # Vérifier si l'URL normalisée se termine déjà par le suffixe OpenAI
-        if normalized_url.endswith(openai_suffix):
-            target_url = normalized_url
-        # Gérer le cas où l'URL est juste le domaine de base d'OpenAI
-        elif normalized_url == "https://api.openai.com":
-             target_url = f"{normalized_url}/{openai_suffix}"
-        # Si l'URL contient déjà "v1" mais pas le suffixe complet (par ex. proxy ou version custom)
-        # ou si l'URL est une base différente qui a besoin du suffixe.
-        # Cette logique assume que si l'URL ne se termine pas par le suffixe complet, et n'est pas le domaine nu,
-        # alors le suffixe doit être ajouté.
-        else:
+        if not normalized_url.endswith(openai_suffix):
             target_url = f"{normalized_url}/{openai_suffix}"
-        app.logger.info(f"Appel à l'API OpenAI sur l'URL: {target_url}")
-
-    try:
-        response = requests.post(target_url, headers=headers, json=payload, timeout=180) # Timeout augmenté
-        response.raise_for_status()
-        llm_response = response.json()
-        
-        content_to_return = ""
-        if LLM_SERVER_API_TYPE == "openai":
-            choices = llm_response.get("choices")
-            if choices and isinstance(choices, list) and len(choices) > 0:
-                message = choices[0].get("message")
-                if message and isinstance(message, dict):
-                    content_to_return = message.get("content", "")
-                else:
-                    app.logger.error(f"Format de message inattendu dans la réponse OpenAI: {message}")
-                    return jsonify({"error": "Unexpected message format in OpenAI API response", "details": llm_response}), 500
-            else:
-                app.logger.error(f"Tableau 'choices' manquant ou invalide dans la réponse OpenAI: {llm_response}")
-                return jsonify({"error": "Missing or invalid 'choices' in OpenAI API response", "details": llm_response}), 500
-        
-        elif LLM_SERVER_API_TYPE == "ollama":
-            if llm_response.get("message") and isinstance(llm_response["message"], dict) and "content" in llm_response["message"]:
-                content_to_return = llm_response["message"].get("content", "")
-            elif "error" in llm_response:
-                app.logger.error(f"Erreur retournée par l'API Ollama: {llm_response['error']}")
-                return jsonify({"error": f"Ollama API error: {llm_response['error']}", "details": llm_response}), 500
-            else:
-                app.logger.error(f"Réponse inattendue de l'API Ollama (/api/chat): {llm_response}")
-                return jsonify({"error": "Unexpected response format from Ollama API (/api/chat)", "details": llm_response}), 500
         else:
-            app.logger.error(f"Type d'API LLM non supporté: {LLM_SERVER_API_TYPE}")
-            return jsonify({"error": f"Unsupported LLM API type: {LLM_SERVER_API_TYPE}"}), 400
-        
-        return jsonify({"response": content_to_return})
+            target_url = normalized_url
+        app.logger.info(f"Appel à l'API OpenAI sur l'URL: {target_url}")
+    
+    try:
+        # Pass stream=True to requests.post to enable response streaming from requests library perspective
+        api_response = requests.post(target_url, headers=headers, json=payload, timeout=180, stream=LLM_SERVER_STREAM_RESPONSE)
+        api_response.raise_for_status() # Raise HTTPError for bad responses (4xx or 5xx)
+
+        if LLM_SERVER_STREAM_RESPONSE:
+            def generate_stream_response():
+                app.logger.info(f"Streaming activé. Début du traitement du flux depuis {LLM_SERVER_API_TYPE}.")
+                # Using iter_lines to process Server-Sent Events (SSE)
+                for line in api_response.iter_lines():
+                    if line:
+                        decoded_line = line.decode('utf-8')
+                        if decoded_line.startswith("data: "):
+                            json_content = decoded_line[len("data: "):].strip()
+                            if json_content == "[DONE]": # OpenAI stream termination
+                                app.logger.info("Stream terminé par [DONE].")
+                                yield f"data: {json.dumps({'type': 'done', 'content': ''})}\\n\\n"
+                                break
+                            
+                            try:
+                                data_chunk = json.loads(json_content)
+                                token_content = ""
+                                event_type = "content" # default
+
+                                if LLM_SERVER_API_TYPE == "openai":
+                                    if data_chunk.get("choices") and len(data_chunk["choices"]) > 0:
+                                        delta = data_chunk["choices"][0].get("delta")
+                                        if delta and "content" in delta and delta["content"] is not None:
+                                            token_content = delta["content"]
+                                        # Could also check for finish_reason if needed, e.g. data_chunk["choices"][0].get("finish_reason")
+                                
+                                elif LLM_SERVER_API_TYPE == "ollama":
+                                    # Ollama streaming for /api/chat:
+                                    # { "model": "...", "created_at": "...", "message": { "role": "assistant", "content": "..." }, "done": false }
+                                    # When done is true, message may or may not have content.
+                                    if data_chunk.get("message") and "content" in data_chunk["message"]:
+                                        token_content = data_chunk["message"]["content"]
+                                    
+                                    if data_chunk.get("done"): # Ollama stream termination
+                                        app.logger.info("Stream Ollama terminé (done: true).")
+                                        # Send final accumulated content if any, then DONE signal
+                                        if token_content: # Send last part if "done" is true and content exists
+                                             yield f"data: {json.dumps({'type': 'content', 'content': token_content})}\\n\\n"
+                                        yield f"data: {json.dumps({'type': 'done', 'content': ''})}\\n\\n"
+                                        break # Stop generation
+
+                                if token_content: # Send if there is actual content
+                                    # app.logger.debug(f"Stream chunk: {token_content}")
+                                    yield f"data: {json.dumps({'type': event_type, 'content': token_content})}\\n\\n"
+                                elif data_chunk.get("error"): # Check for streamed error messages
+                                    error_message = data_chunk.get("error")
+                                    app.logger.error(f"Erreur reçue dans le flux: {error_message}")
+                                    yield f"data: {json.dumps({'type': 'error', 'content': error_message})}\\n\\n"
+                                    break # Stop on error
+
+                            except json.JSONDecodeError:
+                                app.logger.warning(f"Ligne non-JSON dans le flux (ignorée): {json_content}")
+                            except Exception as e_stream:
+                                app.logger.error(f"Erreur pendant le traitement du flux: {e_stream}")
+                                yield f"data: {json.dumps({'type': 'error', 'content': str(e_stream)})}\\n\\n"
+                                break # Stop on unexpected error
+                app.logger.info("Générateur de flux terminé.")
+            return Response(generate_stream_response(), mimetype='text/event-stream')
+        else:
+            # Non-streaming response handling
+            llm_response_json = api_response.json()
+            content_to_return = ""
+            if LLM_SERVER_API_TYPE == "openai":
+                choices = llm_response_json.get("choices")
+                if choices and len(choices) > 0 and choices[0].get("message"):
+                    content_to_return = choices[0]["message"].get("content", "")
+                else:
+                    app.logger.error(f"Format de réponse OpenAI non-streamé inattendu: {llm_response_json}")
+                    return jsonify({"error": "Invalid OpenAI response format", "details": llm_response_json}), 500
+            elif LLM_SERVER_API_TYPE == "ollama":
+                if llm_response_json.get("message") and "content" in llm_response_json["message"]:
+                    content_to_return = llm_response_json["message"]["content"]
+                elif "error" in llm_response_json: # Ollama can return an error object
+                     app.logger.error(f"Erreur de l'API Ollama (non-streamé): {llm_response_json['error']}")
+                     return jsonify({"error": f"Ollama API error: {llm_response_json['error']}", "details": llm_response_json}), 500
+                else:
+                    app.logger.error(f"Format de réponse Ollama non-streamé inattendu: {llm_response_json}")
+                    return jsonify({"error": "Invalid Ollama response format", "details": llm_response_json}), 500
+            else:
+                return jsonify({"error": f"Unsupported LLM API type: {LLM_SERVER_API_TYPE}"}), 400
+            
+            return jsonify({"response": content_to_return})
 
     except requests.exceptions.HTTPError as http_err:
-        error_content = "No additional error content from server."
+        error_details = "Unknown error"
         try:
-            error_content = http_err.response.json()
-        except ValueError: 
-            error_content = http_err.response.text
-        app.logger.error(f"Erreur HTTP lors de l'appel à l'API LLM: {http_err}. Contenu: {error_content}")
-        return jsonify({"error": f"HTTP error calling LLM API: {str(http_err)}", "details": error_content}), http_err.response.status_code
-    except requests.exceptions.RequestException as e:
-        app.logger.error(f"Erreur lors de l'appel à l'API LLM: {e}")
-        return jsonify({"error": f"Error calling LLM API: {str(e)}"}), 500
+            error_details = http_err.response.json()
+        except json.JSONDecodeError:
+            error_details = http_err.response.text
+        app.logger.error(f"HTTP error calling LLM: {http_err} - Details: {error_details}")
+        return jsonify({"error": f"HTTP error: {http_err}", "details": error_details}), \
+               http_err.response.status_code if http_err.response else 500
+    except requests.exceptions.RequestException as req_err:
+        app.logger.error(f"Request exception calling LLM: {req_err}")
+        return jsonify({"error": f"Request error: {str(req_err)}"}), 500
+    except Exception as e:
+        app.logger.error(f"Unexpected error in send_to_llm: {e}", exc_info=True)
+        return jsonify({"error": f"Unexpected server error: {str(e)}"}), 500
 
 if __name__ == '__main__':
-    # Récupérer le port depuis les arguments de la ligne de commande
-    port = 5000 # Port par défaut
-    host = '127.0.0.1' # Hôte par défaut
+    port = 5000
+    host = '127.0.0.1'
     if '--port' in sys.argv:
         try:
-            port_index = sys.argv.index('--port') + 1
-            if port_index < len(sys.argv):
-                port = int(sys.argv[port_index])
-            else:
-                print("Erreur: --port nécessite un argument de numéro de port.", file=sys.stderr)
-                sys.exit(1)
-        except ValueError:
-            print("Erreur: Le port doit être un entier.", file=sys.stderr)
+            port = int(sys.argv[sys.argv.index('--port') + 1])
+        except (IndexError, ValueError):
+            print("Erreur: --port nécessite un argument de numéro de port valide.", file=sys.stderr)
             sys.exit(1)
-        except IndexError:
-            # Ce cas ne devrait pas arriver si --port est le dernier argument sans valeur
-            print("Erreur: --port nécessite un argument de numéro de port.", file=sys.stderr)
-            sys.exit(1)
-
     if '--host' in sys.argv:
         try:
-            host_index = sys.argv.index('--host') + 1
-            if host_index < len(sys.argv):
-                host = sys.argv[host_index]
-            else:
-                print("Erreur: --host nécessite un argument d'adresse IP.", file=sys.stderr)
-                sys.exit(1)
+            host = sys.argv[sys.argv.index('--host') + 1]
         except IndexError:
             print("Erreur: --host nécessite un argument d'adresse IP.", file=sys.stderr)
             sys.exit(1)

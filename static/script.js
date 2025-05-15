@@ -1,6 +1,9 @@
 // static/script.js
 
 document.addEventListener('DOMContentLoaded', () => {
+    // Lire l'état du streaming depuis l'attribut data du body
+    const isLlmStreamEnabled = document.body.dataset.llmStreamEnabled === 'true';
+    
     // --- DOM element references ---
     const directoryPicker = document.getElementById('directoryPicker');
     const analyzeBtn = document.getElementById('analyzeBtn');
@@ -28,11 +31,17 @@ document.addEventListener('DOMContentLoaded', () => {
     const summaryContainer = document.getElementById('summaryContainer');
     const copyBtn = document.getElementById('copyBtn');
 
+    const llmErrorChat = document.getElementById('llm-error-chat');
+    const llmChatSpinner = document.getElementById('llm-chat-spinner');
+
     // --- State variables ---
     let currentFilesData = []; // Will store uploaded files (object with name, full relative path and content)
     let includedFilePaths = []; // Will store only the included file paths (not ignored by gitignore)
     let selectionToPreserveForRegeneration = new Set();
     let isRegeneratingFlowActive = false;
+
+    let chatHistory = []; // Stocke l'historique : [{role: 'user'/'assistant', content: '...'}, ...]
+    let currentAssistantMessageDiv = null; // Pour le streaming
 
     // --- Utility functions ---
     function showElement(element) { element?.classList.remove('visually-hidden'); }
@@ -51,6 +60,67 @@ document.addEventListener('DOMContentLoaded', () => {
     function hideError(errorElement) { hideElement(errorElement); if (errorElement) errorElement.textContent = ''; }
     function showSpinner(spinnerElement) { showElement(spinnerElement); }
     function hideSpinner(spinnerElement) { hideElement(spinnerElement); }
+
+    function escapeHtml(unsafe) {
+        return unsafe
+             .replace(/&/g, "&amp;")
+             .replace(/</g, "&lt;")
+             .replace(/>/g, "&gt;")
+             .replace(/"/g, "&quot;")
+             .replace(/'/g, "&#039;");
+    }
+
+    function appendMessageToChat(role, content, existingDiv = null) {
+        const messageWrapper = existingDiv ? existingDiv.closest('.chat-message-wrapper') : document.createElement('div');
+        if (!existingDiv) {
+            messageWrapper.classList.add('chat-message-wrapper', `chat-${role}`);
+        }
+
+        const messageDiv = existingDiv || document.createElement('div');
+        if (!existingDiv) {
+            messageDiv.classList.add('chat-bubble');
+        }
+        
+        let processedContent = content;
+        if (content) { // Ne pas traiter si le contenu initial est vide (pour le streaming)
+            processedContent = content.replace(/```([a-zA-Z]*)\\n([\\s\\S]*?)\\n```/g, 
+                (match, lang, code) => `<div class=\"code-block-wrapper\"><pre><code class=\"language-${lang || 'plaintext'}\">${escapeHtml(code.trim())}</code></pre></div>`);
+            processedContent = processedContent.replace(/\\n/g, '<br>');
+        }
+        
+        messageDiv.innerHTML = processedContent;
+
+        if (role === 'assistant' && !existingDiv) { // Ajouter le bouton copier seulement à la création
+            const copyBtnElement = document.createElement('button');
+            copyBtnElement.innerHTML = '<i class="far fa-copy"></i>';
+            copyBtnElement.classList.add('btn', 'btn-sm', 'btn-outline-secondary', 'copy-chat-btn');
+            copyBtnElement.title = 'Copier ce message';
+            
+            // Le contenu à copier sera mis à jour dynamiquement pour le streaming
+            let contentToCopy = content; 
+            
+            copyBtnElement.onclick = () => {
+                // S'assurer de copier le contenu final si streamé
+                const finalContent = messageDiv.dataset.finalContent || contentToCopy; 
+                navigator.clipboard.writeText(finalContent).then(() => {
+                    const originalIcon = copyBtnElement.innerHTML;
+                    copyBtnElement.innerHTML = '<i class="fas fa-check text-success"></i>';
+                    setTimeout(() => { copyBtnElement.innerHTML = originalIcon; }, 1500);
+                }).catch(err => {
+                    console.error('Erreur de copie:', err);
+                    alert("Impossible de copier le message.")
+                });
+            };
+            messageWrapper.appendChild(copyBtnElement);
+        }
+        
+        if (!existingDiv) {
+            messageWrapper.insertBefore(messageDiv, messageWrapper.firstChild);
+            chatDisplayArea.appendChild(messageWrapper);
+        }
+        chatDisplayArea.scrollTop = chatDisplayArea.scrollHeight;
+        return messageDiv; // Retourner l'élément pour le streaming
+    }
 
     // --- Directory analysis (upload of selected files) ---
     analyzeBtn.addEventListener('click', async () => {
@@ -475,4 +545,186 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
     }
-});
+
+    async function sendChatHistoryToLlm() {
+        llmChatSpinner.classList.remove('visually-hidden');
+        sendChatMessageBtn.disabled = true;
+        chatMessageInput.disabled = true;
+        chatMessageInput.style.backgroundColor = '#e9ecef';
+        llmErrorChat.classList.add('visually-hidden');
+        currentAssistantMessageDiv = null; // Réinitialiser pour le streaming
+
+        try {
+            const response = await fetch('/send_to_llm', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ messages: chatHistory }),
+            });
+
+            if (!response.ok) {
+                // Gérer les erreurs HTTP non-2xx avant de tenter de lire le corps
+                const errorData = await response.json().catch(() => ({ error: "Failed to parse error response", details: response.statusText }));
+                const errorMsg = (errorData.error || "Unknown error") + 
+                                 (errorData.details ? ` Détails: ${typeof errorData.details === 'object' ? JSON.stringify(errorData.details) : errorData.details}` : '');
+                appendMessageToChat('system-error', `Erreur de l'assistant: ${errorMsg}`);
+                llmErrorChat.textContent = errorMsg;
+                llmErrorChat.classList.remove('visually-hidden');
+                return; // Sortir après avoir géré l'erreur
+            }
+            
+            if (isLlmStreamEnabled && response.headers.get("content-type")?.includes("text/event-stream")) {
+                // Gestion du streaming
+                currentAssistantMessageDiv = appendMessageToChat('assistant', ''); // Créer une bulle vide
+                let accumulatedContent = "";
+
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+
+                while (true) {
+                    const { value, done } = await reader.read();
+                    if (done) {
+                        chatHistory.push({ role: 'assistant', content: accumulatedContent });
+                        if (currentAssistantMessageDiv) {
+                             // Stocker le contenu final pour le bouton copier
+                            currentAssistantMessageDiv.dataset.finalContent = accumulatedContent;
+                            // Potentiellement re-render avec le formatage Markdown complet si nécessaire ici
+                            // Pour l'instant, le formatage est appliqué au fur et à mesure.
+                        }
+                        break;
+                    }
+
+                    const chunk = decoder.decode(value, { stream: true });
+                    // Les événements SSE sont séparés par \\n\\n. Un chunk peut en contenir plusieurs.
+                    const lines = chunk.split('\\n\\n');
+                    for (const line of lines) {
+                        if (line.startsWith("data: ")) {
+                            const jsonData = line.substring(5).trim();
+                            if (jsonData) {
+                                try {
+                                    const parsedData = JSON.parse(jsonData);
+                                    if (parsedData.type === 'content' && parsedData.content) {
+                                        accumulatedContent += parsedData.content;
+                                        // Mettre à jour la bulle de l'assistant de manière incrémentale
+                                        // Le re-formatage à chaque chunk peut être coûteux,
+                                        // mais pour l'instant on le fait pour la simplicité visuelle.
+                                        appendMessageToChat('assistant', accumulatedContent, currentAssistantMessageDiv);
+                                    } else if (parsedData.type === 'done') {
+                                        console.log("Stream: Done event received from server.");
+                                        // La boucle while(true) sera rompue par le reader.read() done.
+                                    } else if (parsedData.type === 'error') {
+                                        console.error("Stream: Error event received:", parsedData.content);
+                                        appendMessageToChat('system-error', `Erreur streamée: ${parsedData.content}`);
+                                        // Peut-être arrêter le traitement ici ou afficher dans llmErrorChat aussi
+                                    }
+                                } catch (e) {
+                                    console.error("Error parsing streamed JSON:", jsonData, e);
+                                }
+                            }
+                        }
+                    }
+                }
+            } else {
+                // Gestion non-streamée (existante)
+                const result = await response.json();
+                if (result.response) { // Si la réponse non-streamée a réussi
+                    chatHistory.push({ role: 'assistant', content: result.response });
+                    appendMessageToChat('assistant', result.response);
+                } else if (result.error) { // Si la réponse non-streamée est une erreur JSON structurée
+                    const errorMsg = result.error + (result.details ? ` Détails: ${typeof result.details === 'object' ? JSON.stringify(result.details) : result.details}` : '');
+                    appendMessageToChat('system-error', `Erreur de l'assistant: ${errorMsg}`);
+                    llmErrorChat.textContent = errorMsg;
+                    llmErrorChat.classList.remove('visually-hidden');
+                } else { // Réponse non-streamée inattendue
+                    appendMessageToChat('system-error', `Réponse inattendue du serveur.`);
+                    llmErrorChat.textContent = "Réponse inattendue du serveur.";
+                    llmErrorChat.classList.remove('visually-hidden');
+                }
+            }
+
+        } catch (error) {
+            console.error("Error sending chat history to LLM:", error);
+            appendMessageToChat('system-error', `Erreur lors de la communication avec l'assistant: ${error.message}`);
+            llmErrorChat.textContent = "Erreur lors de la communication avec l'assistant. Veuillez réessayer plus tard.";
+            llmErrorChat.classList.remove('visually-hidden');
+        } finally {
+            llmChatSpinner.classList.add('visually-hidden');
+            sendChatMessageBtn.disabled = false;
+            chatMessageInput.disabled = false;
+            chatMessageInput.style.backgroundColor = '';
+            currentAssistantMessageDiv = null; // Nettoyer après usage
+        }
+    }
+
+    // --- Gestion des événements du Chat --- 
+
+    function adjustTextareaHeight(textarea) {
+        textarea.style.height = 'auto'; // Réinitialiser la hauteur
+        textarea.style.height = (textarea.scrollHeight) + 'px'; // Ajuster à la hauteur du contenu
+    }
+
+    if (startLlmChatBtn) {
+        startLlmChatBtn.addEventListener('click', async () => {
+            const initialContext = markdownOutput.value;
+            const customInstructions = instructionsTextarea.value;
+            
+            if (!initialContext.trim()) {
+                // Utiliser showError pour une meilleure intégration UI
+                showError(llmErrorChat, "Le contexte Markdown est vide. Veuillez d'abord générer un contexte.", llmChatSpinner);
+                // alert('Le contexte Markdown est vide. Veuillez d'abord générer un contexte.');
+                return;
+            }
+
+            chatHistory = []; 
+            chatDisplayArea.innerHTML = ''; 
+            hideError(llmErrorChat); // Cacher les erreurs précédentes
+            
+            let firstUserMessageContent = "Voici le contexte du projet sur lequel je souhaite discuter:\n\n" + initialContext;
+            if (customInstructions.trim()) {
+                firstUserMessageContent += "\n\nInstructions spécifiques pour cette discussion:\n" + customInstructions;
+            }
+
+            chatHistory.push({ role: 'user', content: firstUserMessageContent });
+            appendMessageToChat('user', "Contexte du projet et instructions initiales envoyés au LLM.");
+
+            chatUiContainer.classList.remove('visually-hidden');
+            startLlmChatBtn.classList.add('visually-hidden');
+            
+            await sendChatHistoryToLlm();
+        });
+    }
+
+    if (sendChatMessageBtn && chatMessageInput) {
+        sendChatMessageBtn.addEventListener('click', () => {
+            const userMessage = chatMessageInput.value.trim();
+            if (userMessage) {
+                chatHistory.push({ role: 'user', content: userMessage });
+                appendMessageToChat('user', userMessage);
+                chatMessageInput.value = '';
+                adjustTextareaHeight(chatMessageInput);
+                sendChatHistoryToLlm();
+            }
+        });
+
+        chatMessageInput.addEventListener('keypress', (event) => {
+            if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault(); 
+                sendChatMessageBtn.click();
+            }
+        });
+        
+        chatMessageInput.addEventListener('input', () => adjustTextareaHeight(chatMessageInput));
+        adjustTextareaHeight(chatMessageInput); // Ajuster initialement si du texte est déjà présent (peu probable ici)
+    }
+    
+    // Assurer que les références DOM pour le chat sont bien définies au début de DOMContentLoaded
+    // const markdownOutput = document.getElementById('markdownOutput');
+    // const instructionsTextarea = document.getElementById('instructionsTextarea');
+    // const chatDisplayArea = document.getElementById('chatDisplayArea');
+    // const chatMessageInput = document.getElementById('chatMessageInput');
+    // const sendChatMessageBtn = document.getElementById('sendChatMessageBtn');
+    // const startLlmChatBtn = document.getElementById('startLlmChatBtn');
+    // const chatUiContainer = document.getElementById('chatUiContainer');
+    // const llmErrorChat = document.getElementById('llm-error-chat'); // Déjà défini plus haut
+    // const llmChatSpinner = document.getElementById('llm-chat-spinner'); // Déjà défini plus haut
+
+}); // Fin de DOMContentLoaded

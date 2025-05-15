@@ -65,6 +65,9 @@ apikey = YOUR_LLM_API_KEY_HERE # Optional for local Ollama, required for OpenAI
 model = YOUR_LLM_MODEL_HERE   # e.g., gpt-3.5-turbo or llama3
 api_type = openai             # 'openai' or 'ollama'
 enabled = false               # Set to true to enable LLM interaction features
+stream_response = false       # Set to true to enable streaming responses from the LLM
+
+[Tokens]
 ```
 
 ### Web Interface

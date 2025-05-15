@@ -7,4 +7,8 @@ url = YOUR_LLM_API_URL_HERE
 apikey = YOUR_LLM_API_KEY_HERE
 model = YOUR_LLM_MODEL_HERE
 api_type = openai # Can be 'openai' or 'ollama'
-enabled = false 
+enabled = false
+stream_response = false
+
+[Tokens]
+# Optional: API key for token calculation services if you use one 
