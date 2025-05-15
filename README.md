@@ -16,14 +16,16 @@ A tool for preparing code repositories for LLM analysis and modification. Create
 
 ### Web Interface Features
 
+![image](https://github.com/user-attachments/assets/e2816992-9967-403a-b8d6-3df66e618a0e)
+
 - **File Selection**: Interactively select files and folders from your chosen directory.
 - **.gitignore Integration**: Automatically respects `.gitignore` rules to exclude irrelevant files.
 - **Custom Instructions**: Add specific instructions to be appended to the end of the generated context, guiding the LLM on subsequent tasks.
+  - Includes buttons for quickly inserting predefined, configurable instruction templates.
+  - Smart insertion logic: appends to existing custom text, or replaces the last predefined instruction if one was just inserted.
 - **Context Regeneration**: Easily regenerate the context. If files have been modified, you'll be guided to re-select the directory to ensure all changes are captured, while your previous file selection is preserved.
 - **Secret Masking Toggle**: Enable or disable sensitive data masking directly from the UI.
 - **Copy to Clipboard**: Quickly copy the generated Markdown context.
-- **Includes buttons for quickly inserting predefined, configurable instruction templates.**
-- **Smart insertion logic: appends to existing custom text, or replaces the last predefined instruction if one was just inserted.**
 
 ## ⚙️ Installation
 
@@ -37,7 +39,7 @@ A tool for preparing code repositories for LLM analysis and modification. Create
 ### Setup
 
 ```bash
-git clone https://github.com/yourusername/code-to-llm.git
+git clone https://github.com/Astral0/code-to-llm.git
 cd code-to-llm
 pip install -r requirements.txt
 ```
@@ -144,7 +146,6 @@ Project_Root/
 --- INSTRUCTIONS ---
 Refactor the main_function to improve readability.
 --- END INSTRUCTIONS ---
-```
 
 ## 💡 Tips for Using with LLMs
 
