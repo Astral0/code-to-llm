@@ -159,15 +159,29 @@ body {
     color: inherit;
 }
 
-#chatInputContainer textarea {
-    resize: none; 
-    overflow-y: hidden; /* Cache la scrollbar verticale, la hauteur s'adapte */
-    min-height: 38px; /* Hauteur initiale pour une ligne */
-    max-height: 150px; /* Limite pour éviter une extension infinie */
+#chatInputContainer {
+    display: flex; 
+    align-items: flex-end; 
 }
 
-#chatInputContainer .btn {
-    height: 100%; /* S'assurer que le bouton prend toute la hauteur du textarea qui grandit */
+#chatInputContainer textarea#chatMessageInput { /* Plus spécifique pour surcharger si besoin */
+    flex-grow: 1; 
+    resize: none; 
+    overflow-y: auto;   
+    min-height: 40px;   
+    max-height: 150px;  
+    padding: 8px 12px; 
+    border: 1px solid #ced4da;
+    border-radius: 0.25rem; /* Bootstrap standard */
+    line-height: 1.5; 
+    margin-right: 0.5rem; /* Espace entre textarea et bouton */
+    /* Transition pour un redimensionnement plus doux si possible (facultatif) */
+    /* transition: height 0.1s ease-out; */
+}
+
+#chatInputContainer button#sendChatMessageBtn { /* Plus spécifique */
+    height: 40px; 
+    flex-shrink: 0; 
 }
 
 /* Properly hide spinners and errors by default */
