@@ -14,6 +14,15 @@ A tool for preparing code repositories for LLM analysis and modification. Create
 - **Sensitive Data Protection**: Detects and masks API keys, passwords, tokens and other credentials
 - **Token Estimation**: Provides approximate token count for LLM context windows
 
+### Web Interface Features
+
+- **File Selection**: Interactively select files and folders from your chosen directory.
+- **.gitignore Integration**: Automatically respects `.gitignore` rules to exclude irrelevant files.
+- **Custom Instructions**: Add specific instructions to be appended to the end of the generated context, guiding the LLM on subsequent tasks.
+- **Context Regeneration**: Easily regenerate the context. If files have been modified, you'll be guided to re-select the directory to ensure all changes are captured, while your previous file selection is preserved.
+- **Secret Masking Toggle**: Enable or disable sensitive data masking directly from the UI.
+- **Copy to Clipboard**: Quickly copy the generated Markdown context.
+
 ## ⚙️ Installation
 
 ### Requirements
@@ -31,15 +40,15 @@ cd code-to-llm
 pip install -r requirements.txt
 ```
 
-## 📋 Usage
-
 ### Web Interface
 
 ```bash
-python web_server.py
+python web_server.py # Default port 5000
+# or specify a custom port, e.g., 8080
+python web_server.py --port 8080
 ```
 
-Then open http://127.0.0.1:5000 in your browser.
+Then open http://127.0.0.1:5000 (or your custom port) in your browser.
 
 ### Command Line
 
@@ -62,7 +71,7 @@ python llm_context_builder.py serve --port 8080 --host 0.0.0.0
 
 ## 🛡️ Security Features
 
-### Sensitive Data Protection
+### Sensitive Data Masking
 
 The tool automatically detects and masks sensitive information in your code, including:
 
@@ -76,6 +85,15 @@ When sensitive data is detected, it will be replaced with a masked indicator suc
 
 ```
 [LINE CONTAINING SENSITIVE DATA: ArtifactoryDetector]
+```
+
+Or, depending on the detection method and file type:
+```
+[LINE REMOVED DUE TO DETECTED SECRET]
+```
+Or sometimes simply, for very sensitive lines:
+```
+[LINE CONTAINING SENSITIVE DATA: some_pattern_name]
 ```
 
 > **Note**: This masking helps prevent accidental leakage of sensitive information when sharing code context with LLMs. You can enable or disable this feature in the web interface.
@@ -94,6 +112,7 @@ The generated context includes:
 1. A header with project information
 2. A directory tree visualization
 3. The content of each file with language-specific formatting
+4. Custom instructions, if provided by the user
 
 ```
 --- START CONTEXT ---
@@ -120,6 +139,9 @@ Project_Root/
 --- END FILE: src/main.py ---
 
 ...
+--- INSTRUCTIONS ---
+Refactor the main_function to improve readability.
+--- END INSTRUCTIONS ---
 ```
 
 ## 💡 Tips for Using with LLMs

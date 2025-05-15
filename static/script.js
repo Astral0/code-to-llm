@@ -7,6 +7,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const analyzeSpinner = document.getElementById('analyze-spinner');
     const analyzeError = document.getElementById('analyze-error');
     const analyzeStatusContainer = document.getElementById('analyze-status');
+    const instructionsTextarea = document.getElementById('instructionsTextarea');
+    const regenerateBtn = document.getElementById('regenerateBtn');
 
     const fileSelectionSection = document.getElementById('file-selection-section');
     const fileListDiv = document.getElementById('fileList');
@@ -27,12 +29,21 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- State variables ---
     let currentFilesData = []; // Will store uploaded files (object with name, full relative path and content)
     let includedFilePaths = []; // Will store only the included file paths (not ignored by gitignore)
+    let selectionToPreserveForRegeneration = new Set();
+    let isRegeneratingFlowActive = false;
 
     // --- Utility functions ---
     function showElement(element) { element?.classList.remove('visually-hidden'); }
     function hideElement(element) { element?.classList.add('visually-hidden'); }
-    function showError(errorElement, message, statusContainer) {
-        if (errorElement) { errorElement.textContent = message; showElement(errorElement); }
+    function showError(errorElement, message, statusContainer, isHtml = false) {
+        if (errorElement) { 
+            if (isHtml) {
+                errorElement.innerHTML = message;
+            } else {
+                errorElement.textContent = message;
+            }
+            showElement(errorElement); 
+        }
         hideElement(statusContainer?.querySelector('.spinner-border'));
     }
     function hideError(errorElement) { hideElement(errorElement); if (errorElement) errorElement.textContent = ''; }
@@ -55,6 +66,10 @@ document.addEventListener('DOMContentLoaded', () => {
         currentFilesData = [];
         includedFilePaths = [];
 
+        // Réinitialiser l'état des boutons de génération/régénération
+        showElement(generateBtn);
+        hideElement(regenerateBtn);
+
         // Read all files using FileReader and retrieve their full relative path
         const readFilePromises = [];
         for (let i = 0; i < files.length; i++) {
@@ -70,7 +85,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     });
                 };
                 reader.onerror = () => {
-                    reject(new Error(`Error reading file ${file.name}`));
+                    console.log(`[DEBUG] FileReader.onerror triggered for ${file.name}`);
+                    console.error(`FileReader error for ${file.name}:`, reader.error);
+                    reject(new Error(`Error reading file ${file.name}. See console for details.`));
                 };
                 reader.readAsText(file);
             }));
@@ -96,8 +113,35 @@ document.addEventListener('DOMContentLoaded', () => {
             // Render the file tree
             renderFileList(data.files);
             
-            showElement(fileSelectionSection);
-            showElement(generationSection);
+            hideError(analyzeError); // Clear any instruction/error message from analyze step
+
+            if (isRegeneratingFlowActive) {
+                // Re-apply preserved selection
+                fileListDiv.querySelectorAll('.form-check-input').forEach(checkbox => {
+                    if (selectionToPreserveForRegeneration.has(checkbox.value)) {
+                        checkbox.checked = true;
+                    } else {
+                        checkbox.checked = false; // Ensure others are unchecked
+                    }
+                });
+                selectionToPreserveForRegeneration = new Set(); // Clear after use
+                isRegeneratingFlowActive = false; // Reset flag
+
+                showElement(fileSelectionSection);
+                showElement(generationSection);
+                await executeActualGeneration(); // Automatically generate context
+            } else {
+                // Normal analysis flow: select all by default (or existing logic)
+                // Ensure all files are checked by default in the new tree
+                selectAllBtn.click(); // Simulate click to check all new files
+                showElement(fileSelectionSection);
+                showElement(generationSection);
+            }
+
+            // Faire défiler vers la section de génération une fois l'analyse terminée
+            if (generationSection.classList.contains('visually-hidden') === false) {
+                generationSection.scrollIntoView({ behavior: 'smooth' });
+            }
         } catch (error) {
             console.error("Analysis error:", error);
             showError(analyzeError, `Analysis error: ${error.message}`, analyzeStatusContainer);
@@ -225,7 +269,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // --- Generate context ---
-    generateBtn.addEventListener('click', async () => {
+    async function executeActualGeneration() {
         const selectedCheckboxes = fileListDiv.querySelectorAll('.form-check-input:checked');
         // The value of each checkbox is the full path of the selected file
         let selectedFiles = Array.from(selectedCheckboxes).map(cb => cb.value);
@@ -245,6 +289,9 @@ document.addEventListener('DOMContentLoaded', () => {
         summaryContainer.innerHTML = "";
         document.getElementById('secretsMaskedAlert').classList.add('d-none');
         
+        // Récupérer les instructions personnalisées
+        const instructions = instructionsTextarea.value || "Ne fais rien, attends mes instructions.";
+
         // Récupérer la configuration de masquage des secrets
         const enableSecretMasking = enableSecretMaskingCheckbox 
             ? enableSecretMaskingCheckbox.checked 
@@ -257,8 +304,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 body: JSON.stringify({ 
                     selected_files: selectedFiles,
                     masking_options: {
-                        enable_masking: enableSecretMasking
-                    }
+                        enable_masking: enableSecretMasking,
+                        mask_mode: "mask"
+                    },
+                    instructions: instructions
                 })
             });
             const data = await response.json();
@@ -312,6 +361,13 @@ document.addEventListener('DOMContentLoaded', () => {
             showElement(resultArea);
             copyBtn.disabled = false;
             copyBtn.innerHTML = '<i class="far fa-copy"></i> Copy';
+            // Afficher le bouton de régénération et cacher le bouton de génération
+            generateBtn.classList.add('d-none');
+            regenerateBtn.classList.remove('d-none');
+            showElement(regenerateBtn);
+
+            // Faire défiler pour montrer le contexte généré
+            resultArea.scrollIntoView({ behavior: 'smooth' });
         } catch (error) {
             console.error('Generation error:', error);
             showError(generateError, `Generation error: ${error.message}`);
@@ -320,6 +376,10 @@ document.addEventListener('DOMContentLoaded', () => {
         } finally {
             hideSpinner(generateSpinner);
         }
+    }
+
+    generateBtn.addEventListener('click', async () => {
+        await executeActualGeneration();
     });
 
     // --- Copy the generated context to the clipboard ---
@@ -339,5 +399,27 @@ document.addEventListener('DOMContentLoaded', () => {
             console.error('Copy error:', err);
             alert('Error: Unable to copy to clipboard.');
         }
+    });
+
+    // Ajouter l'événement pour le bouton de régénération
+    regenerateBtn.addEventListener('click', async () => {
+        selectionToPreserveForRegeneration = new Set(
+            Array.from(fileListDiv.querySelectorAll('.form-check-input:checked')).map(cb => cb.value)
+        );
+        isRegeneratingFlowActive = true;
+
+        // Cacher les sections suivantes pour guider l'utilisateur vers le haut
+        hideElement(fileSelectionSection);
+        hideElement(generationSection);
+        hideElement(resultArea);
+
+        const instructionMessage = "<strong>Action requise pour régénérer :</strong><br>" +
+                                 "1. Re-sélectionnez votre répertoire de projet en utilisant le champ ci-dessus (Étape 1).<br>" +
+                                 "2. Cliquez ensuite sur le bouton <strong>Analyer le répertoire</strong>.<br>" +
+                                 "Votre sélection de fichiers sera restaurée et le contexte sera généré automatiquement.";
+        showError(analyzeError, instructionMessage, analyzeStatusContainer, true);
+
+        // Optionnel: faire défiler vers le haut pour que l'utilisateur voie le message et le sélecteur
+        window.scrollTo({ top: 0, behavior: 'smooth' });
     });
 });

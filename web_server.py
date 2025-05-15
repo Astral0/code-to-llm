@@ -235,7 +235,7 @@ def get_model_compatibility(tokens):
     else:
         return "Very large size (>180k tokens), requires specific models or context reduction"
 
-def build_uploaded_context_string(uploaded_files, root_name="Uploaded_Directory", enable_masking=True, mask_mode="mask"):
+def build_uploaded_context_string(uploaded_files, root_name="Uploaded_Directory", enable_masking=True, mask_mode="mask", instructions=None):
     # Generate the tree from relative paths
     relative_paths = [f["path"] for f in uploaded_files]
     tree_string = generate_tree_from_paths(relative_paths, root_name)
@@ -297,6 +297,11 @@ def build_uploaded_context_string(uploaded_files, root_name="Uploaded_Directory"
         else:
             formatted_content = content + "\n"
         context_parts.append(header_file + formatted_content + footer_file)
+    
+    # Ajouter les instructions à la fin du contexte si elles sont fournies
+    if instructions:
+        instructions_part = "\n--- INSTRUCTIONS ---\n" + instructions + "\n--- END INSTRUCTIONS ---\n"
+        context_parts.append(instructions_part)
     
     # Join all parts to form the context
     full_context = "".join(context_parts)
@@ -462,7 +467,8 @@ def generate_context():
        "masking_options": {
            "enable_masking": true,
            "mask_mode": "mask"  // ou "remove" pour supprimer les lignes complètes
-       }
+       },
+       "instructions": "Ne fais rien, attends mes instructions."
     }
     Returns the Markdown context AND a separate summary with statistics.
     """
@@ -476,6 +482,9 @@ def generate_context():
     masking_options = data.get("masking_options", {})
     enable_masking = masking_options.get("enable_masking", True)  # Activé par défaut
     mask_mode = masking_options.get("mask_mode", "mask")  # 'mask' ou 'remove'
+    
+    # Récupérer les instructions personnalisées
+    instructions = data.get("instructions", "Ne fais rien, attends mes instructions.")
     
     app.logger.info(f"Secret masking: {'enabled' if enable_masking else 'disabled'}, mode: {mask_mode}")
     
@@ -496,7 +505,8 @@ def generate_context():
         uploaded_files=selected_files,
         root_name="Uploaded_Directory",
         enable_masking=enable_masking,
-        mask_mode=mask_mode
+        mask_mode=mask_mode,
+        instructions=instructions
     )
     
     
