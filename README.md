@@ -44,6 +44,14 @@ cd code-to-llm
 pip install -r requirements.txt
 ```
 
+The web interface allows for configuration of predefined instruction templates via a `config.ini` file at the root of the project. See the `config.ini.example` (if provided) or the following structure:
+
+```ini
+[Instructions]
+instruction1_text = Your first predefined instruction.
+instruction2_text = Your second predefined instruction.
+```
+
 ### Web Interface
 
 ```bash
@@ -60,14 +68,47 @@ Then open http://127.0.0.1:5000 (or your custom port) in your browser.
 python llm_context_builder.py cli path/to/your/project -o output.md
 ```
 
+### CLI Options
+
+```bash
+# General
+python llm_context_builder.py cli <paths_to_scan...>
+
+# Output Configuration
+  -o, --output-file <file>    Specify the output file for the context. (Default: stdout)
+  --no-tree                   Disable the generation of the directory tree visualization.
+  --no-header                 Disable the standard context header.
+  --no-footer                 Disable the standard file footers (--- END FILE ---).
+
+# Content Filtering & Handling
+  --repo-root <path>          Specify the project root if different from the scanned path.
+                              Used for more accurate relative paths in the context.
+  --exclude <pattern>         Specify additional glob patterns to exclude files/directories.
+                              Can be used multiple times. (e.g., --exclude "*.log" --exclude "temp/")
+  --include-binary            Include a short header of binary files instead of skipping them.
+  --max-size <size>           Maximum size for individual files (e.g., 1M, 500K). Files exceeding this
+                              will be truncated or skipped (behavior may vary).
+  --encoding <enc>            Specify encoding for reading files (e.g., utf-8, latin-1).
+                              (Default: utf-8 with error handling)
+
+# Security & Masking
+  --no-masking                Disable all sensitive data masking.
+  --masking-mode <mode>       Set masking mode: 'mask' (replace with placeholder, default) 
+                              or 'remove' (remove the line containing the secret).
+
+# Instructions
+  --instructions "<text>"   Add custom instructions to the end of the generated context.
+
+# Other
+  --debug                     Enable debug logging for verbose output.
+  --no-progress               Disable the progress bar during file processing.
+```
+
 ### Advanced Options
 
 ```bash
 # Specify a custom repository root
-python llm_context_builder.py cli path/to/your/project --repo-root /custom/root -o output.md
-
-# Enable debug logging
-python llm_context_builder.py cli path/to/your/project -o output.md --debug
+python llm_context_builder.py cli path/to/your/project -o output.md --repo-root /custom/root --debug
 
 # Start web server on a specific port
 python llm_context_builder.py serve --port 8080 --host 0.0.0.0
