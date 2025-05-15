@@ -1,12 +1,13 @@
 /* static/style.css */
 
 body {
-    background-color: #f8f9fa; /* Light gray Bootstrap */
-    font-family: var(--bs-body-font-family); /* Use Bootstrap font */
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    background-color: #f4f7f6;
+    color: #333;
 }
 
 .container {
-    max-width: 960px; /* Limit width for better readability */
+    max-width: 900px;
 }
 
 /* Card styling for sections */
@@ -16,10 +17,8 @@ body {
 }
 
 .card-header {
-    background-color: #e9ecef; /* Slightly darker header background */
+    background-color: #e9ecef;
     font-weight: 500;
-    border-bottom: 1px solid #dee2e6;
-    padding: 0.75rem 1.25rem; /* Adjusted padding */
 }
 
 .card-body {
@@ -28,82 +27,147 @@ body {
 
 /* File tree styling */
 .file-tree {
-    font-size: 0.9em; /* Slightly smaller font size for the tree */
+    font-size: 0.9em;
+    padding: 10px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    background-color: #fff;
+    /* max-height: 400px; */ /* Déjà dans l'HTML, peut être contrôlé ici */
+    /* overflow-y: auto; */ /* Déjà dans l'HTML */
 }
 
 .file-tree ul {
     list-style-type: none;
-    padding-left: 25px; /* More indentation for levels */
-    margin-bottom: 0; /* Remove bottom margin from ULs */
+    padding-left: 20px;
 }
 
 .file-tree li {
-    padding: 2px 0; /* Light vertical spacing between items */
+    padding: 3px 0;
 }
 
-.file-tree .form-check {
-    /* Align checkbox and label correctly */
-    padding-left: 1.75em; /* Space for checkbox */
-    margin-bottom: 0; /* Avoid double margins */
+.file-tree input[type="checkbox"] {
+    margin-right: 8px;
 }
 
-.file-tree .form-check-input {
-    margin-top: 0.2em; /* Adjust vertical alignment of checkbox */
-    cursor: pointer;
+.file-tree .folder > label {
+    font-weight: bold;
 }
 
-.file-tree .form-check-label {
-    cursor: pointer;
-    display: inline-flex; /* To align icon and text */
-    align-items: center;
-    word-break: break-all; /* Break long filenames */
-}
-.file-tree .form-check-label i {
-    margin-right: 5px;
-    width: 16px; /* Fixed width for icon */
-    text-align: center;
-    color: #6c757d; /* Discreet color for icons */
-}
-.file-tree .folder > .form-check > .form-check-label {
-    font-weight: 500; /* Slightly bolder folders */
-}
-.file-tree .folder > .form-check > .form-check-label i {
-    color: #0d6efd; /* Different color for folder icons */
+.file-tree .file > label {
+    font-weight: normal;
 }
 
-.file-tree .placeholder-message {
-    padding: 2rem;
+/* Amélioration de l'alerte de secrets */
+#secretsMaskedAlert {
+    border-left: 5px solid #ffc107;
 }
 
-
-/* Copy button styling */
-#copyBtn {
-    opacity: 0.6;
-    transition: opacity 0.2s ease-in-out, background-color 0.2s ease-in-out;
-    background-color: rgba(255, 255, 255, 0.7); /* Semi-transparent background */
-    border: 1px solid #ced4da;
+#secretsMaskedAlert h6 {
+    color: #856404;
 }
 
-#copyBtn:hover {
-    opacity: 1;
-    background-color: rgba(233, 236, 239, 0.9); /* More opaque background on hover */
+/* Styles pour l'interface de Chat */
+#chatDisplayArea {
+    background-color: #f8f9fa; /* Fond légèrement différent pour la zone de chat */
+    /* Autres styles via l'attribut style en HTML pour l'instant */
 }
 
-/* Class for copy feedback */
-#copyBtn.copied-feedback {
-    background-color: rgba(25, 135, 84, 0.8); /* Bootstrap green semi-transparent */
+.chat-message-wrapper {
+    margin-bottom: 10px;
+    display: flex; /* Pour aligner le bouton de copie */
+    align-items: flex-end; /* Aligner le bouton en bas de la bulle */
+}
+
+.chat-bubble {
+    padding: 10px 15px;
+    border-radius: 20px;
+    max-width: 75%;
+    word-wrap: break-word; /* Éviter le débordement de texte long */
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    line-height: 1.4;
+}
+
+.chat-user .chat-bubble {
+    background-color: #007bff;
     color: white;
-    border-color: #198754;
-    opacity: 1;
-}
-#copyBtn.copied-feedback i {
-    color: white; /* Ensure check icon is white */
+    margin-left: auto; /* Aligne à droite */
+    border-bottom-right-radius: 5px;
 }
 
-/* Result text area styling */
-#markdownOutput {
-    background-color: #e9ecef !important; /* Different background for text area */
-    border: 1px solid #ced4da;
+.chat-assistant .chat-bubble {
+    background-color: #e9ecef;
+    color: #212529;
+    margin-right: auto; /* Aligne à gauche */
+    border-bottom-left-radius: 5px;
+}
+
+.chat-system-error .chat-bubble {
+    background-color: #f8d7da; /* Rouge clair pour les erreurs système */
+    color: #721c24;
+    border: 1px solid #f5c6cb;
+    font-style: italic;
+    font-size: 0.9em;
+    margin-left: auto;
+    margin-right: auto;
+    max-width: 90%;
+}
+
+/* Styles pour les boutons copier dans le chat */
+.copy-chat-btn {
+    background: none;
+    border: none;
+    color: #6c757d;
+    padding: 0.25rem 0.5rem;
+    margin-left: 8px; /* Espace entre la bulle et le bouton */
+    opacity: 0.7;
+    transition: opacity 0.2s ease-in-out;
+}
+
+.chat-message-wrapper:hover .copy-chat-btn {
+    opacity: 1;
+}
+
+.copy-chat-btn:hover {
+    color: #007bff;
+}
+
+
+/* Style pour les blocs de code dans le chat */
+.chat-bubble .code-block-wrapper {
+    margin-top: 8px;
+    margin-bottom: 5px;
+}
+
+.chat-bubble pre {
+    background-color: #282c34; /* Fond plus sombre pour le code */
+    color: #abb2bf; /* Texte clair pour le code */
+    padding: 12px;
+    border-radius: 6px;
+    font-family: var(--bs-font-monospace); /* Utiliser la même police que le contexte */
+    font-size: 0.875em;
+    white-space: pre-wrap; /* Respecter les retours à la ligne et les espaces */
+    max-height: 350px; /* Limiter la hauteur des blocs de code */
+    overflow: auto; /* Ajouter une barre de défilement si nécessaire */
+    border: 1px solid #3e4451;
+}
+
+.chat-bubble pre code {
+    /* La plupart des styles sont sur pre, mais on peut affiner ici */
+    background: none;
+    padding: 0;
+    font-size: inherit;
+    color: inherit;
+}
+
+#chatInputContainer textarea {
+    resize: none; 
+    overflow-y: hidden; /* Cache la scrollbar verticale, la hauteur s'adapte */
+    min-height: 38px; /* Hauteur initiale pour une ligne */
+    max-height: 150px; /* Limite pour éviter une extension infinie */
+}
+
+#chatInputContainer .btn {
+    height: 100%; /* S'assurer que le bouton prend toute la hauteur du textarea qui grandit */
 }
 
 /* Properly hide spinners and errors by default */

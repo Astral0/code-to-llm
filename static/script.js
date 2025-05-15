@@ -23,7 +23,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const generateError = document.getElementById('generate-error');
     const enableSecretMaskingCheckbox = document.getElementById('enableSecretMasking');
 
-    const resultArea = document.getElementById('resultArea');
+    const resultAndChatArea = document.getElementById('resultAndChatArea');
     const markdownOutput = document.getElementById('markdownOutput');
     const summaryContainer = document.getElementById('summaryContainer');
     const copyBtn = document.getElementById('copyBtn');
@@ -63,7 +63,7 @@ document.addEventListener('DOMContentLoaded', () => {
         showSpinner(analyzeSpinner);
         hideElement(fileSelectionSection);
         hideElement(generationSection);
-        hideElement(resultArea);
+        hideElement(resultAndChatArea);
         fileListDiv.innerHTML = '<p class="text-muted text-center placeholder-message">Analyzing...</p>';
         currentFilesData = [];
         includedFilePaths = [];
@@ -270,116 +270,136 @@ document.addEventListener('DOMContentLoaded', () => {
         return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ");
     }
 
+    function displaySummary(summary) {
+        const summaryContainer = document.getElementById('summaryContainer');
+        if (!summaryContainer) return;
+
+        summaryContainer.innerHTML = ''; // Clear previous summary
+
+        if (!summary) {
+            summaryContainer.innerHTML = '<p class="text-muted">No summary data available.</p>';
+            return;
+        }
+
+        const title = document.createElement('h5');
+        title.innerHTML = '<i class="fas fa-list-alt text-muted"></i> Generation Summary:';
+        summaryContainer.appendChild(title);
+
+        const list = document.createElement('ul');
+        list.classList.add('list-group', 'list-group-flush', 'small');
+
+        const items = {
+            "Total files processed": summary.total_files,
+            "Total files included": summary.included_files_count,
+            "Total files excluded (by .gitignore or rules)": summary.excluded_files_count,
+            "Total lines of code included": summary.total_lines,
+            "Total characters included": summary.total_chars,
+            "Estimated tokens (approximate)": summary.total_tokens
+        };
+
+        for (const [key, value] of Object.entries(items)) {
+            if (value !== undefined && value !== null) {
+                const listItem = document.createElement('li');
+                listItem.classList.add('list-group-item', 'd-flex', 'justify-content-between', 'align-items-center', 'p-1');
+                listItem.innerHTML = `${key}: <span class="badge bg-primary rounded-pill">${formatNumber(value)}</span>`;
+                list.appendChild(listItem);
+            }
+        }
+        summaryContainer.appendChild(list);
+    }
+
+    function displaySecretsAlert(secrets_masked_count, files_with_secrets) {
+        const secretsAlertDiv = document.getElementById('secretsMaskedAlert');
+        const secretsDetailsUl = document.getElementById('secretsMaskedDetails');
+
+        if (!secretsAlertDiv || !secretsDetailsUl) return;
+
+        secretsDetailsUl.innerHTML = ''; // Clear previous details
+
+        if (secrets_masked_count > 0 && files_with_secrets && files_with_secrets.length > 0) {
+            secretsAlertDiv.classList.remove('d-none');
+            
+            files_with_secrets.forEach(filePath => {
+                const li = document.createElement('li');
+                li.textContent = filePath;
+                secretsDetailsUl.appendChild(li);
+            });
+        } else {
+            secretsAlertDiv.classList.add('d-none');
+        }
+    }
+
     // --- Generate context ---
     async function executeActualGeneration() {
         const selectedCheckboxes = fileListDiv.querySelectorAll('.form-check-input:checked');
-        // The value of each checkbox is the full path of the selected file
-        const selectedFiles = Array.from(selectedCheckboxes).map(cb => cb.value)
-                                     .filter(path => includedFilePaths.includes(path));
-        
+        const selectedFiles = Array.from(selectedCheckboxes).map(cb => cb.value);
+
         if (selectedFiles.length === 0) {
-            showError(generateError, "Please select at least one file.", null);
-            hideElement(resultArea);
+            showError(generateError, "No files selected for context generation.", generationSection);
             return;
         }
         hideError(generateError);
         showSpinner(generateSpinner);
-        hideElement(resultArea);
-        markdownOutput.value = "Generating context...";
-        summaryContainer.innerHTML = "";
-        document.getElementById('secretsMaskedAlert').classList.add('d-none');
-        
-        // Récupérer les instructions personnalisées
-        const instructions = instructionsTextarea.value; // Prend la valeur actuelle, peut être vide
+        hideElement(resultAndChatArea);
 
-        // Récupérer la configuration de masquage des secrets
-        const enableSecretMasking = enableSecretMaskingCheckbox 
-            ? enableSecretMaskingCheckbox.checked 
-            : true; // Activé par défaut si le checkbox n'existe pas
+        // Préserver la sélection pour une éventuelle régénération
+        selectionToPreserveForRegeneration = new Set(selectedFiles);
+
+        // Récupérer les options de masquage
+        const enableMasking = enableSecretMaskingCheckbox.checked;
+        // Pour l'instant, on ne propose pas de changer le mask_mode via UI, donc on utilise le défaut du serveur.
+        const maskingOptions = { enable_masking: enableMasking, mask_mode: "mask" }; 
+
+        // Récupérer les instructions
+        const instructions = instructionsTextarea.value;
 
         try {
             const response = await fetch('/generate', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ 
-                    selected_files: selectedFiles,
-                    masking_options: {
-                        enable_masking: enableSecretMasking,
-                        mask_mode: "mask"
-                    },
+                    selected_files: selectedFiles, 
+                    masking_options: maskingOptions,
                     instructions: instructions
                 })
             });
-            const data = await response.json();
-            if (!response.ok || !data.success) {
-                throw new Error(data.error || `Error ${response.status}`);
+            const result = await response.json();
+            if (!response.ok || !result.success) {
+                throw new Error(result.error || `Error ${response.status}`);
             }
+            markdownOutput.value = result.markdown;
+            displaySummary(result.summary);
+            displaySecretsAlert(result.summary.secrets_masked, result.summary.files_with_secrets); 
             
-            // Display the markdown context
-            markdownOutput.value = data.markdown || "";
-
-            // Afficher l'alerte de sécurité si des secrets ont été masqués
-            if (data.summary && data.summary.secrets_masked > 0) {
-                const secretsAlert = document.getElementById('secretsMaskedAlert');
-                const secretsDetails = document.getElementById('secretsMaskedDetails');
-                
-                // Afficher les détails
-                secretsDetails.innerHTML = `
-                    <li><strong>${data.summary.secrets_masked}</strong> sensitive items masked</li>
-                    <li><strong>${data.summary.files_with_secrets}</strong> of ${data.summary.files_count} files contained sensitive data</li>
-                `;
-                
-                // Afficher l'alerte
-                secretsAlert.classList.remove('d-none');
-            }
-            
-            // Display the summary separately
-            if (data.summary) {
-                const summary = data.summary;
-                
-                // Ajouter une information sur les secrets masqués si applicable
-                const secretsMaskedInfo = summary.secrets_masked > 0 
-                    ? `<li>Sensitive data masked: ${summary.secrets_masked} items in ${summary.files_with_secrets} files</li>` 
-                    : '';
-                
-                summaryContainer.innerHTML = `
-                <div class="alert alert-primary">
-                    <h6><i class="fas fa-info-circle"></i> Context summary</h6>
-                    <ul class="mb-0">
-                        ${secretsMaskedInfo}
-                        <li>Number of files: ${summary.files_count}</li>
-                        <li>Number of characters: ${formatNumber(summary.char_count)}</li>
-                        <li>Estimated tokens: ~${formatNumber(summary.estimated_tokens)}</li>
-                        <li>Compatibility: ${summary.model_compatibility}</li>
-                    </ul>
-                    <div class="mt-2">
-                        <small class="text-muted">Note: This estimation is approximate and may vary depending on the tokenizer used by the LLM.</small>
-                    </div>
-                </div>`;
-            }
-            
-            showElement(resultArea);
-            copyBtn.disabled = false;
-            copyBtn.innerHTML = '<i class="far fa-copy"></i> Copy';
-            // Afficher le bouton de régénération et cacher le bouton de génération
-            generateBtn.classList.add('d-none');
-            regenerateBtn.classList.remove('d-none');
+            showElement(resultAndChatArea);
             showElement(regenerateBtn);
+            hideElement(generateBtn);
 
-            // Faire défiler pour montrer le contexte généré
-            resultArea.scrollIntoView({ behavior: 'smooth' });
+            // Logique pour afficher/cacher les éléments de chat après génération
+            // Ces éléments sont définis dans index.html, mais nous les contrôlons ici aussi
+            const llmInteractionContainer = document.getElementById('llmInteractionContainer');
+            const startLlmChatBtn = document.getElementById('startLlmChatBtn');
+            const chatUiContainer = document.getElementById('chatUiContainer');
+
+            if (llmInteractionContainer) showElement(llmInteractionContainer);
+            if (startLlmChatBtn) showElement(startLlmChatBtn);
+            if (chatUiContainer) hideElement(chatUiContainer); // Cacher l'UI de chat si on (re)génère
+            
+            // Scroll to the result area
+            resultAndChatArea.scrollIntoView({ behavior: 'smooth' });
+
         } catch (error) {
-            console.error('Generation error:', error);
-            showError(generateError, `Generation error: ${error.message}`);
-            markdownOutput.value = "";
-            summaryContainer.innerHTML = "";
+            console.error("Generation error:", error);
+            showError(generateError, `Generation error: ${error.message}`, generationSection);
         } finally {
             hideSpinner(generateSpinner);
         }
     }
 
-    generateBtn.addEventListener('click', async () => {
-        await executeActualGeneration();
+    generateBtn.addEventListener('click', executeActualGeneration);
+    regenerateBtn.addEventListener('click', () => {
+        isRegeneratingFlowActive = true;
+        analyzeBtn.click(); // Relancer le flux d'analyse, qui réappliquera la sélection
     });
 
     // --- Copy the generated context to the clipboard ---
@@ -399,28 +419,6 @@ document.addEventListener('DOMContentLoaded', () => {
             console.error('Copy error:', err);
             alert('Error: Unable to copy to clipboard.');
         }
-    });
-
-    // Ajouter l'événement pour le bouton de régénération
-    regenerateBtn.addEventListener('click', async () => {
-        selectionToPreserveForRegeneration = new Set(
-            Array.from(fileListDiv.querySelectorAll('.form-check-input:checked')).map(cb => cb.value)
-        );
-        isRegeneratingFlowActive = true;
-
-        // Cacher les sections suivantes pour guider l'utilisateur vers le haut
-        hideElement(fileSelectionSection);
-        hideElement(generationSection);
-        hideElement(resultArea);
-
-        const instructionMessage = "<strong>Action requise pour régénérer :</strong><br>" +
-                                 "1. Re-sélectionnez votre répertoire de projet en utilisant le champ ci-dessus (Étape 1).<br>" +
-                                 "2. Cliquez ensuite sur le bouton <strong>Analyer le répertoire</strong>.<br>" +
-                                 "Votre sélection de fichiers sera restaurée et le contexte sera généré automatiquement.";
-        showError(analyzeError, instructionMessage, analyzeStatusContainer, true);
-
-        // Optionnel: faire défiler vers le haut pour que l'utilisateur voie le message et le sélecteur
-        window.scrollTo({ top: 0, behavior: 'smooth' });
     });
 
     // --- Gestion des boutons d'instructions prédéfinies ---

@@ -67,9 +67,9 @@ analysis_cache = {
 try:
     from detect_secrets import SecretsCollection
     from detect_secrets.settings import default_settings
-    from detect_secrets.plugins.base import BasePlugin
-    from detect_secrets.core import baseline
-    from detect_secrets.plugins import initialize
+    # from detect_secrets.plugins.base import BasePlugin # Moins utilisé directement
+    # from detect_secrets.core import baseline # Moins utilisé directement
+    from detect_secrets.plugins import initialize as initialize_detect_secrets_plugins
     HAS_DETECT_SECRETS = True
 except ImportError:
     app.logger.warning("detect-secrets library not found. Secret masking will be disabled.")
@@ -100,17 +100,15 @@ def detect_and_redact_secrets(content, file_path, redact_mode='mask'):
         secrets = SecretsCollection()
         
         # Initialiser les plugins de détection disponibles
-        plugins_used = []
-        all_plugins = list(initialize.from_parser_builder())
-        for plugin in all_plugins:
-            plugins_used.append(plugin)
-        
-        # Analyser le contenu pour détecter les secrets
+        plugins_used = list(initialize_detect_secrets_plugins.from_parser_builder([]))
         for plugin in plugins_used:
-            secrets.scan_string_content(content, plugin, path=file_path)
+            try:
+                secrets.scan_string_content(content, plugin, path=file_path)
+            except Exception as plugin_error:
+                app.logger.debug(f"Plugin {plugin.__class__.__name__} failed for {file_path}: {plugin_error}")
         
         # Si aucun secret n'est détecté, retourner le contenu original
-        if len(secrets.data) == 0:
+        if not secrets.data:
             return content, 0
         
         # Redacter les secrets détectés
@@ -169,7 +167,7 @@ def detect_and_redact_with_regex(content, file_path):
     # Patterns courants de secrets et informations d'identification
     patterns = {
         # API Keys - différents formats courants
-        'api_key': r'(?i)(api[_-]?key|apikey|api token)["\']?\s*[:=]\s*["\']?([0-9a-zA-Z]{16,64})["\']?',
+        'api_key': r'(?i)(api[_-]?key|apikey|api_token|auth_token|authorization_token|bearer_token)["\']?\s*[:=]\s*["\']?([0-9a-zA-Z\-_\.]{16,128})["\']?',
         # Tokens divers (OAuth, JWT, etc.)
         'token': r'(?i)(access_token|auth_token|token)["\']?\s*[:=]\s*["\']?([0-9a-zA-Z._\-]{8,64})["\']?',
         # Clés AWS
@@ -177,9 +175,15 @@ def detect_and_redact_with_regex(content, file_path):
         # URLs contenant username:password
         'url_auth': r'(?i)https?://[^:@/\s]+:[^:@/\s]+@[^/\s]+',
         # Clés privées
-        'private_key': r'(?i)(-----BEGIN [A-Z]+ PRIVATE KEY-----)',
+        'private_key_pem': r'-----BEGIN ((RSA|EC|OPENSSH|PGP) )?PRIVATE KEY-----',
         # Documentation de credentials/variables sensibles avec valeurs
         'credentials_doc': r'(?i)# ?(password|secret|key|token|credential).*[=:] ?"[^"]{3,}"',
+        # Clés AWS
+        'aws_secret': r'(?i)(aws[\w_\-]*secret[\w_\-]*key)["\']?\s*[:=]\s*["\']?([0-9a-zA-Z\-_\/+]{40})["\']?',
+        # Clés privées
+        'private_key': r'(?i)(-----BEGIN [A-Z]+ PRIVATE KEY-----)',
+        # Connection strings
+        'connection_string': r'(?i)(mongodb|mysql|postgresql|sqlserver|redis|amqp)://[^:]+:[^@]+@[:\w\.\-]+[/:\w\d\?=&%\-\.]*'
     }
     
     # Initialiser les variables
@@ -239,7 +243,11 @@ def detect_language(filename):
         ".json": "json",
         ".md": "markdown",
         ".txt": "text",
-        # Add other extensions as needed
+        ".java": "java", ".cs": "csharp", ".cpp": "cpp", ".c": "c", ".h": "c",
+        ".rb": "ruby", ".php": "php", ".swift": "swift", ".kt": "kotlin",
+        ".rs": "rust", ".go": "go", ".ts": "typescript", ".tsx": "typescript",
+        ".sh": "bash", ".bat": "batch", ".ps1": "powershell",
+        ".yaml": "yaml", ".yml": "yaml", ".xml": "xml", ".toml": "toml", ".ini": "ini"
     }
     return lang_map.get(ext, "")
 
@@ -577,43 +585,74 @@ def send_to_llm():
     if not LLM_SERVER_ENABLED:
         return jsonify({"error": "LLM feature is not enabled in config.ini"}), 400
 
-    if not all([LLM_SERVER_URL, LLM_SERVER_APIKEY, LLM_SERVER_MODEL]):
+    # Vérifier si les paramètres essentiels sont là, en tenant compte qu'Ollama n'a pas besoin d'apikey
+    if not LLM_SERVER_URL or not LLM_SERVER_MODEL or (LLM_SERVER_API_TYPE != "ollama" and not LLM_SERVER_APIKEY):
+        app.logger.error(f"LLM server configuration incomplete. URL: {LLM_SERVER_URL}, Model: {LLM_SERVER_MODEL}, APIKey set: {bool(LLM_SERVER_APIKEY)}, Type: {LLM_SERVER_API_TYPE}")
         return jsonify({"error": "LLM server configuration is incomplete in config.ini"}), 400
 
     data = request.get_json()
-    context_content = data.get('context')
+    messages_history = data.get('messages')
+    app.logger.info(f"Dans /send_to_llm, LLM_SERVER_API_TYPE = {LLM_SERVER_API_TYPE}")
+    # Limiter la taille du log pour l'historique des messages
+    if messages_history and len(messages_history) > 0:
+        log_msg_content = messages_history[-1]['content'] # Log only last message content for brevity
+        app.logger.info(f"Dernier message de l'historique ({messages_history[-1]['role']}): {log_msg_content[:200]}{'...' if len(log_msg_content)>200 else ''}")
+    else:
+        app.logger.warning("Aucun historique de messages reçu.")
 
-    app.logger.info(f"Dans /send_to_llm, LLM_SERVER_API_TYPE = {LLM_SERVER_API_TYPE}") # Log de diagnostic
 
-    if not context_content:
-        return jsonify({"error": "No context provided"}), 400
+    if not messages_history or not isinstance(messages_history, list) or len(messages_history) == 0:
+        return jsonify({"error": "No messages provided"}), 400
 
     headers = {
         "Content-Type": "application/json"
     }
-    # Ajout conditionnel de l'en-tête Authorization
-    if LLM_SERVER_APIKEY and LLM_SERVER_API_TYPE != "ollama": # Ollama local n'a souvent pas besoin d'apikey via /api/chat
+    if LLM_SERVER_APIKEY and LLM_SERVER_API_TYPE != "ollama":
         headers["Authorization"] = f"Bearer {LLM_SERVER_APIKEY}"
 
     payload = {
         "model": LLM_SERVER_MODEL,
-        "messages": [
-            {"role": "user", "content": context_content}
-        ]
-        # Vous pouvez ajouter d'autres paramètres ici si nécessaire (temperature, max_tokens, etc.)
+        "messages": messages_history
     }
+    if LLM_SERVER_API_TYPE == "ollama":
+        payload["stream"] = False # Pour Ollama /api/chat, s'assurer que stream est false
 
     target_url = LLM_SERVER_URL
     if LLM_SERVER_API_TYPE == "ollama":
-        # S'assurer que l'URL ne se termine pas par un slash avant d'ajouter /api/chat
-        if target_url.endswith('/'):
-            target_url = target_url[:-1]
-        target_url += "/api/chat"
+        # Normaliser l'URL en supprimant les slashes de fin potentiels
+        normalized_url = target_url.rstrip('/')
+        ollama_suffix = "api/chat"
+        openai_compatible_suffix = "v1/chat/completions" # Pour Ollama en mode compatibilité OpenAI
+
+        if normalized_url.endswith(ollama_suffix) or normalized_url.endswith(openai_compatible_suffix):
+            target_url = normalized_url # L'URL est déjà complète avec un suffixe connu
+        else:
+            # Par défaut, ajouter /api/chat si aucun suffixe connu n'est présent et que l'URL ne semble pas déjà le contenir
+            # Cela suppose que si l'URL ne se termine pas par ces suffixes, elle est une URL de base.
+            target_url = f"{normalized_url}/{ollama_suffix}"
         app.logger.info(f"Appel à l'API Ollama sur l'URL: {target_url}")
+    elif LLM_SERVER_API_TYPE == "openai":
+        # Normaliser l'URL en supprimant les slashes de fin potentiels
+        normalized_url = target_url.rstrip('/')
+        openai_suffix = "v1/chat/completions"
+        
+        # Vérifier si l'URL normalisée se termine déjà par le suffixe OpenAI
+        if normalized_url.endswith(openai_suffix):
+            target_url = normalized_url
+        # Gérer le cas où l'URL est juste le domaine de base d'OpenAI
+        elif normalized_url == "https://api.openai.com":
+             target_url = f"{normalized_url}/{openai_suffix}"
+        # Si l'URL contient déjà "v1" mais pas le suffixe complet (par ex. proxy ou version custom)
+        # ou si l'URL est une base différente qui a besoin du suffixe.
+        # Cette logique assume que si l'URL ne se termine pas par le suffixe complet, et n'est pas le domaine nu,
+        # alors le suffixe doit être ajouté.
+        else:
+            target_url = f"{normalized_url}/{openai_suffix}"
+        app.logger.info(f"Appel à l'API OpenAI sur l'URL: {target_url}")
 
     try:
-        response = requests.post(target_url, headers=headers, json=payload, timeout=120) # Timeout de 120 secondes
-        response.raise_for_status()  # Lèvera une exception pour les codes d'erreur HTTP 4xx/5xx
+        response = requests.post(target_url, headers=headers, json=payload, timeout=180) # Timeout augmenté
+        response.raise_for_status()
         llm_response = response.json()
         
         content_to_return = ""
@@ -629,20 +668,13 @@ def send_to_llm():
             else:
                 app.logger.error(f"Tableau 'choices' manquant ou invalide dans la réponse OpenAI: {llm_response}")
                 return jsonify({"error": "Missing or invalid 'choices' in OpenAI API response", "details": llm_response}), 500
+        
         elif LLM_SERVER_API_TYPE == "ollama":
-            # Pour Ollama avec /api/chat (compatible OpenAI pour la requête)
-            # la réponse est typiquement: {"model": "...", "message": {"role": "assistant", "content": "..."} ...}
-            if llm_response.get("message") and llm_response["message"].get("content"):
+            if llm_response.get("message") and isinstance(llm_response["message"], dict) and "content" in llm_response["message"]:
                 content_to_return = llm_response["message"].get("content", "")
-            # Ollama peut aussi envoyer des réponses en streaming "done: false" puis "done: true"
-            # Si on reçoit une réponse partielle (cas non-streamé ici mais bon à savoir)
-            elif llm_response.get("response") and not llm_response.get("done"):
-                 # Ceci est pour le endpoint /api/generate, /api/chat est différent
-                 # Pour /api/chat, le message complet arrive quand done=true (implicite ici car on ne streame pas)
-                 app.logger.warning(f"Réponse partielle ou format inattendu d'Ollama (/api/chat devrait avoir message.content): {llm_response}")
-                 content_to_return = llm_response.get("response", "") # Fallback pour /api/generate
-            elif llm_response.get("response") and llm_response.get("done") is True:
-                content_to_return = llm_response.get("response", "") # Pour /api/generate
+            elif "error" in llm_response:
+                app.logger.error(f"Erreur retournée par l'API Ollama: {llm_response['error']}")
+                return jsonify({"error": f"Ollama API error: {llm_response['error']}", "details": llm_response}), 500
             else:
                 app.logger.error(f"Réponse inattendue de l'API Ollama (/api/chat): {llm_response}")
                 return jsonify({"error": "Unexpected response format from Ollama API (/api/chat)", "details": llm_response}), 500
@@ -655,17 +687,45 @@ def send_to_llm():
     except requests.exceptions.HTTPError as http_err:
         error_content = "No additional error content from server."
         try:
-            error_content = http_err.response.json() # Essayer de parser le JSON de l'erreur
-        except ValueError: # Au cas où la réponse d'erreur n'est pas du JSON
+            error_content = http_err.response.json()
+        except ValueError: 
             error_content = http_err.response.text
         app.logger.error(f"Erreur HTTP lors de l'appel à l'API LLM: {http_err}. Contenu: {error_content}")
         return jsonify({"error": f"HTTP error calling LLM API: {str(http_err)}", "details": error_content}), http_err.response.status_code
-    except requests.exceptions.RequestException as e: # Erreurs plus générales (connexion, timeout, etc.)
+    except requests.exceptions.RequestException as e:
         app.logger.error(f"Erreur lors de l'appel à l'API LLM: {e}")
         return jsonify({"error": f"Error calling LLM API: {str(e)}"}), 500
-    except Exception as e:
-        app.logger.error(f"Erreur inattendue lors du traitement de la réponse LLM: {e}")
-        return jsonify({"error": f"Unexpected error processing LLM response: {str(e)}"}), 500
 
 if __name__ == '__main__':
-    app.run(host='127.0.0.1', port=5000, debug=True)
+    # Récupérer le port depuis les arguments de la ligne de commande
+    port = 5000 # Port par défaut
+    host = '127.0.0.1' # Hôte par défaut
+    if '--port' in sys.argv:
+        try:
+            port_index = sys.argv.index('--port') + 1
+            if port_index < len(sys.argv):
+                port = int(sys.argv[port_index])
+            else:
+                print("Erreur: --port nécessite un argument de numéro de port.", file=sys.stderr)
+                sys.exit(1)
+        except ValueError:
+            print("Erreur: Le port doit être un entier.", file=sys.stderr)
+            sys.exit(1)
+        except IndexError:
+            # Ce cas ne devrait pas arriver si --port est le dernier argument sans valeur
+            print("Erreur: --port nécessite un argument de numéro de port.", file=sys.stderr)
+            sys.exit(1)
+
+    if '--host' in sys.argv:
+        try:
+            host_index = sys.argv.index('--host') + 1
+            if host_index < len(sys.argv):
+                host = sys.argv[host_index]
+            else:
+                print("Erreur: --host nécessite un argument d'adresse IP.", file=sys.stderr)
+                sys.exit(1)
+        except IndexError:
+            print("Erreur: --host nécessite un argument d'adresse IP.", file=sys.stderr)
+            sys.exit(1)
+            
+    app.run(host=host, port=port, debug=True)

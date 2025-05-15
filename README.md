@@ -59,6 +59,8 @@ instruction2_text = Your second predefined instruction.
 
 [LLMServer]
 url = YOUR_LLM_API_URL_HERE # e.g., https://api.openai.com/v1/chat/completions or http://localhost:11434
+                             # For OpenAI, can be base 'https://api.openai.com' or full '.../v1/chat/completions'.
+                             # For Ollama, can be base 'http://host:port' or include '/api/chat' or '/v1/chat/completions'.
 apikey = YOUR_LLM_API_KEY_HERE # Optional for local Ollama, required for OpenAI
 model = YOUR_LLM_MODEL_HERE   # e.g., gpt-3.5-turbo or llama3
 api_type = openai             # 'openai' or 'ollama'

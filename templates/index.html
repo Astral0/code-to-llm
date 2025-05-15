@@ -12,7 +12,7 @@
   <div class="container mt-4">
     <header class="pb-3 mb-4 border-bottom">
       <h1 class="mb-0"><i class="fas fa-cogs text-primary"></i> LLM Project Context Builder</h1>
-      <p class="text-muted">Generate Markdown context for your project.</p>
+      <p class="text-muted">Generate Markdown context for your project and chat with an LLM.</p>
     </header>
     
     <section id="selection-section" class="card mb-4 shadow-sm">
@@ -59,12 +59,12 @@
     
     <section id="generation-section" class="card mb-4 shadow-sm visually-hidden">
       <div class="card-header">
-        <i class="fas fa-magic"></i> Step 3: Generate the context
+        <i class="fas fa-magic"></i> Step 3: Generate context & Chat with LLM
       </div>
       <div class="card-body">
         <div class="mb-3">
-          <label for="instructionsTextarea" class="form-label">Instructions à ajouter à la fin du contexte:</label>
-          <textarea id="instructionsTextarea" class="form-control" rows="3" placeholder="Entrez ici vos instructions ou utilisez les boutons ci-dessous..."></textarea>
+          <label for="instructionsTextarea" class="form-label">Instructions initiales pour le LLM (optionnel):</label>
+          <textarea id="instructionsTextarea" class="form-control" rows="3" placeholder="Entrez ici vos instructions initiales ou utilisez les boutons ci-dessous..."></textarea>
           <div class="mt-2">
             <button class="btn btn-sm btn-outline-secondary me-1" type="button" id="insertInstructionBtn1" data-instruction="{{ instruction_text_1 }}" title="Insérer l'instruction prédéfinie 1">
               <i class="fas fa-comment-dots"></i> Instruction 1 (Attente)
@@ -73,50 +73,33 @@
               <i class="fas fa-file-code"></i> Instruction 2 (Patch)
             </button>
           </div>
-          <div class="form-text">
-            Ces instructions seront ajoutées à la fin du contexte markdown généré.
-          </div>
         </div>
         <div class="d-flex align-items-center mb-3">
           <button class="btn btn-success" id="generateBtn" title="Generate context for selected files">
             <i class="fas fa-play"></i> Generate context for selection
           </button>
-          
           <button class="btn btn-primary ms-2 d-none" id="regenerateBtn" title="Regenerate context with updated files">
             <i class="fas fa-sync-alt"></i> Regenerate context
           </button>
-          
-          <!-- Option de configuration pour le masquage des secrets -->
           <div class="dropdown ms-2">
             <button class="btn btn-outline-secondary dropdown-toggle" type="button" id="secretMaskingOptions" data-bs-toggle="dropdown" aria-expanded="false">
               <i class="fas fa-shield-alt"></i> Secret Masking
             </button>
             <ul class="dropdown-menu" aria-labelledby="secretMaskingOptions">
-              <li>
-                <div class="dropdown-item">
-                  <div class="form-check">
-                    <input class="form-check-input" type="checkbox" value="" id="enableSecretMasking" checked>
-                    <label class="form-check-label" for="enableSecretMasking">
-                      Mask sensitive data
-                    </label>
-                  </div>
-                </div>
-              </li>
+              <li><div class="dropdown-item"><div class="form-check">
+                <input class="form-check-input" type="checkbox" value="" id="enableSecretMasking" checked>
+                <label class="form-check-label" for="enableSecretMasking">Mask sensitive data</label>
+              </div></div></li>
             </ul>
           </div>
-          <button class="btn btn-success d-none" id="oldGenerateBtn" title="Generate context for selected files">
-            <i class="fas fa-play"></i> Generate context for selection
-          </button>
           <div id="generate-spinner" class="spinner-border spinner-border-sm text-success ms-2 visually-hidden" role="status">
             <span class="visually-hidden">Generating...</span>
           </div>
         </div>
         <div id="generate-error" class="alert alert-danger p-2 visually-hidden" role="alert" style="font-size: 0.9em;"></div>
-        <div id="resultArea" class="mt-3 visually-hidden">
-          <!-- Container for the summary statistics -->
+        
+        <div id="resultAndChatArea" class="mt-3 visually-hidden"> <!-- Combined Area -->
           <div id="summaryContainer" class="mb-3"></div>
-          
-          <!-- Alerte pour informer l'utilisateur des secrets masqués -->
           <div id="secretsMaskedAlert" class="alert alert-warning mb-3 d-none">
             <h6><i class="fas fa-shield-alt"></i> Security Notice</h6>
             <p>Sensitive information was detected and masked in your files:</p>
@@ -125,28 +108,39 @@
           </div>
           
           <h5><i class="fab fa-markdown text-muted"></i> Generated Markdown context:</h5>
-          <div class="position-relative">
-            <textarea id="markdownOutput" class="form-control bg-light" rows="15" readonly style="font-family: var(--bs-font-monospace); font-size: 0.85em; white-space: pre; overflow-wrap: normal; overflow-x: auto;"></textarea>
+          <div class="position-relative mb-3">
+            <textarea id="markdownOutput" class="form-control bg-light" rows="10" readonly style="font-family: var(--bs-font-monospace); font-size: 0.85em; white-space: pre; overflow-wrap: normal; overflow-x: auto;"></textarea>
             <button id="copyBtn" class="btn btn-sm btn-outline-secondary position-absolute top-0 end-0 m-2" title="Copy to clipboard">
               <i class="far fa-copy"></i> Copy
             </button>
           </div>
+
           {% if llm_feature_enabled %}
-          <div id="llmInteractionSection" class="mt-3">
-            <button id="sendToLlmBtn" class="btn btn-info" title="Envoyer le contexte au LLM configuré">
-              <i class="fas fa-paper-plane"></i> Envoyer au LLM
+          <div id="llmInteractionContainer" class="mt-3">
+            <button id="startLlmChatBtn" class="btn btn-info mb-2 w-100" title="Envoyer le contexte et démarrer la discussion avec le LLM">
+              <i class="fas fa-comments"></i> Démarrer la discussion avec le LLM sur la base de ce contexte
             </button>
-            <div id="llm-spinner" class="spinner-border spinner-border-sm text-info ms-2 visually-hidden" role="status">
-              <span class="visually-hidden">Envoi au LLM...</span>
-            </div>
-            <div id="llmResponseArea" class="mt-3 visually-hidden">
-              <h5><i class="fas fa-robot text-info"></i> Réponse du LLM:</h5>
-              <div id="llm-error" class="alert alert-danger p-2 visually-hidden" role="alert" style="font-size: 0.9em;"></div>
-              <div class="position-relative">
-                <textarea id="llmResponseOutput" class="form-control bg-light" rows="10" readonly style="font-family: var(--bs-font-monospace); font-size: 0.85em; white-space: pre-wrap;"></textarea>
-                <button id="copyLlmResponseBtn" class="btn btn-sm btn-outline-secondary position-absolute top-0 end-0 m-2" title="Copier la réponse du LLM">
-                  <i class="far fa-copy"></i> Copier
-                </button>
+            
+            <div id="chatUiContainer" class="visually-hidden mt-3 card shadow-sm">
+              <div class="card-header">
+                <i class="fas fa-comments text-info"></i> Conversation avec l'Assistant
+              </div>
+              <div class="card-body">
+                <div id="chatDisplayArea" class="border p-3 rounded mb-2" style="min-height: 200px; max-height: 450px; overflow-y: auto; background-color: #f8f9fa;">
+                  <!-- Les messages du chat s'afficheront ici -->
+                </div>
+                <div id="llm-error-chat" class="alert alert-danger p-2 visually-hidden" role="alert" style="font-size: 0.9em;"></div>
+                
+                <div id="chatInputContainer" class="input-group mb-1">
+                  <textarea id="chatMessageInput" class="form-control" placeholder="Votre message..." rows="1"></textarea>
+                  <button id="sendChatMessageBtn" class="btn btn-primary" title="Envoyer le message">
+                    <i class="fas fa-paper-plane"></i>
+                  </button>
+                </div>
+                <div id="llm-chat-spinner" class="d-flex align-items-center text-muted visually-hidden">
+                    <div class="spinner-border spinner-border-sm text-info me-2" role="status"></div>
+                    <span>L'assistant réfléchit...</span>
+                </div>
               </div>
             </div>
           </div>
@@ -164,83 +158,198 @@
   <script src="{{ url_for('static', filename='script.js') }}"></script>
   {% if llm_feature_enabled %}
   <script>
-    // Logique pour l'interaction avec le LLM
-    const sendToLlmBtn = document.getElementById('sendToLlmBtn');
-    const llmResponseArea = document.getElementById('llmResponseArea');
-    const llmResponseOutput = document.getElementById('llmResponseOutput');
-    const markdownOutput = document.getElementById('markdownOutput'); // Référence au textarea du contexte
-    const llmSpinner = document.getElementById('llm-spinner');
-    const llmError = document.getElementById('llm-error');
+    // Elements DOM existants (copier, instructions, etc. non modifiés ici)
+    const markdownOutput = document.getElementById('markdownOutput');
+    const instructionsTextarea = document.getElementById('instructionsTextarea');
+    const generateBtn = document.getElementById('generateBtn');
+    const resultAndChatArea = document.getElementById('resultAndChatArea'); // Nouveau conteneur global
 
-    const copyLlmResponseBtn = document.getElementById('copyLlmResponseBtn');
+    // --- NOUVELLE LOGIQUE POUR LE CHAT ---
+    const startLlmChatBtn = document.getElementById('startLlmChatBtn');
+    const llmInteractionContainer = document.getElementById('llmInteractionContainer');
+    const chatUiContainer = document.getElementById('chatUiContainer');
+    const chatDisplayArea = document.getElementById('chatDisplayArea');
+    const chatMessageInput = document.getElementById('chatMessageInput');
+    const sendChatMessageBtn = document.getElementById('sendChatMessageBtn');
+    const llmErrorChat = document.getElementById('llm-error-chat');
+    const llmChatSpinner = document.getElementById('llm-chat-spinner');
 
-    if (sendToLlmBtn) {
-      sendToLlmBtn.addEventListener('click', async () => {
-        const context = markdownOutput.value;
-        if (!context.trim()) {
-          alert('Le contexte Markdown est vide. Veuillez d\'abord générer un contexte.');
-          return;
+    let chatHistory = []; // Stocke l'historique : [{role: 'user'/'assistant', content: '...'}, ...]
+
+    function escapeHtml(unsafe) {
+        return unsafe
+             .replace(/&/g, "&amp;")
+             .replace(/</g, "&lt;")
+             .replace(/>/g, "&gt;")
+             .replace(/"/g, "&quot;")
+             .replace(/'/g, "&#039;");
+    }
+
+    function appendMessageToChat(role, content) {
+        const messageWrapper = document.createElement('div');
+        messageWrapper.classList.add('chat-message-wrapper', `chat-${role}`);
+
+        const messageDiv = document.createElement('div');
+        messageDiv.classList.add('chat-bubble');
+        
+        // Tentative de formatage Markdown simple pour les blocs de code
+        // Note: ceci est une simplification. Pour un rendu Markdown complet, une bibliothèque dédiée serait mieux.
+        let processedContent = content.replace(/```([a-zA-Z]*)\n([\s\S]*?)\n```/g, 
+            (match, lang, code) => `<div class="code-block-wrapper"><pre><code class="language-${lang || 'plaintext'}">${escapeHtml(code.trim())}</code></pre></div>`);
+        processedContent = processedContent.replace(/\n/g, '<br>'); // Remplacer les nouvelles lignes par <br> hors des blocs de code
+        
+        messageDiv.innerHTML = processedContent;
+
+        if (role === 'assistant') {
+            const copyBtn = document.createElement('button');
+            copyBtn.innerHTML = '<i class="far fa-copy"></i>';
+            copyBtn.classList.add('btn', 'btn-sm', 'btn-outline-secondary', 'copy-chat-btn');
+            copyBtn.title = 'Copier ce message';
+            copyBtn.onclick = () => {
+                navigator.clipboard.writeText(content).then(() => {
+                    const originalIcon = copyBtn.innerHTML;
+                    copyBtn.innerHTML = '<i class="fas fa-check text-success"></i>';
+                    setTimeout(() => { copyBtn.innerHTML = originalIcon; }, 1500);
+                }).catch(err => {
+                    console.error('Erreur de copie:', err);
+                    alert("Impossible de copier le message.")
+                });
+            };
+            messageWrapper.appendChild(copyBtn); // Ajouter à côté de la bulle, pas dedans
         }
+        messageWrapper.insertBefore(messageDiv, messageWrapper.firstChild);
+        chatDisplayArea.appendChild(messageWrapper);
+        chatDisplayArea.scrollTop = chatDisplayArea.scrollHeight;
+    }
 
-        llmResponseArea.classList.add('visually-hidden');
-        llmResponseOutput.value = ''; // Clear previous response
-        llmError.classList.add('visually-hidden');
-        llmError.textContent = '';
-        llmSpinner.classList.remove('visually-hidden');
-        sendToLlmBtn.disabled = true;
+    async function sendChatHistoryToLlm() {
+        llmChatSpinner.classList.remove('visually-hidden');
+        sendChatMessageBtn.disabled = true;
+        chatMessageInput.disabled = true;
+        chatMessageInput.style.backgroundColor = '#e9ecef'; // Grisage léger
+        llmErrorChat.classList.add('visually-hidden');
 
         try {
-          const response = await fetch('/send_to_llm', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ context: context }),
-          });
+            const response = await fetch('/send_to_llm', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ messages: chatHistory }),
+            });
+            const result = await response.json();
 
-          const result = await response.json();
-
-          if (response.ok) {
-            llmResponseOutput.value = result.response || "Le LLM n\'a pas retourné de contenu.";
-            llmResponseArea.classList.remove('visually-hidden');
-          } else {
-            llmError.textContent = result.error || 'Une erreur inconnue est survenue lors de la communication avec le LLM.';
-            if (result.details) {
-                llmError.textContent += ` Détails: ${typeof result.details === 'object' ? JSON.stringify(result.details) : result.details}`;
+            if (response.ok) {
+                chatHistory.push({ role: 'assistant', content: result.response });
+                appendMessageToChat('assistant', result.response);
+            } else {
+                const errorMsg = result.error + (result.details ? ` Détails: ${typeof result.details === 'object' ? JSON.stringify(result.details) : result.details}` : '');
+                appendMessageToChat('system-error', `Erreur de l'assistant: ${errorMsg}`); // Afficher l'erreur dans le chat
+                llmErrorChat.textContent = errorMsg;
+                llmErrorChat.classList.remove('visually-hidden');
             }
-            llmError.classList.remove('visually-hidden');
-          }
         } catch (error) {
-          console.error('Erreur lors de l\'envoi au LLM:', error);
-          llmError.textContent = 'Erreur de communication avec le serveur: ' + error.message;
-          llmError.classList.remove('visually-hidden');
+            console.error('Erreur lors de l\'envoi/réception du chat LLM:', error);
+            const errorMsg = 'Erreur de communication avec le serveur: ' + error.message;
+            appendMessageToChat('system-error', errorMsg);
+            llmErrorChat.textContent = errorMsg;
+            llmErrorChat.classList.remove('visually-hidden');
         } finally {
-          llmSpinner.classList.add('visually-hidden');
-          sendToLlmBtn.disabled = false;
+            llmChatSpinner.classList.add('visually-hidden');
+            sendChatMessageBtn.disabled = false;
+            chatMessageInput.disabled = false;
+            chatMessageInput.style.backgroundColor = '';
+            chatMessageInput.focus();
         }
-      });
     }
 
-    if (copyLlmResponseBtn) {
-      copyLlmResponseBtn.addEventListener('click', () => {
-        llmResponseOutput.select(); // Sélectionne le contenu du textarea
-        document.execCommand('copy'); // Copie dans le presse-papiers (méthode classique)
-        // Alternative moderne (mais attention à la compatibilité et aux permissions) :
-        // navigator.clipboard.writeText(llmResponseOutput.value).then(() => {
-        //   alert('Réponse du LLM copiée dans le presse-papiers!');
-        // }).catch(err => {
-        //   console.error('Erreur lors de la copie de la réponse LLM:', err);
-        //   alert('Impossible de copier la réponse.');
-        // });
-        
-        // Petit retour visuel temporaire (optionnel)
-        const originalText = copyLlmResponseBtn.innerHTML;
-        copyLlmResponseBtn.innerHTML = '<i class="fas fa-check"></i> Copié!';
-        setTimeout(() => {
-          copyLlmResponseBtn.innerHTML = originalText;
-        }, 2000);
-      });
+    if (startLlmChatBtn) {
+        startLlmChatBtn.addEventListener('click', async () => {
+            const initialContext = markdownOutput.value;
+            const customInstructions = instructionsTextarea.value;
+            
+            if (!initialContext.trim()) {
+                alert('Le contexte Markdown est vide. Veuillez d\'abord générer un contexte.');
+                return;
+            }
+
+            chatHistory = []; 
+            chatDisplayArea.innerHTML = ''; 
+            
+            let firstUserMessageContent = "Voici le contexte du projet sur lequel je souhaite discuter:\n\n" + initialContext;
+            if (customInstructions.trim()) {
+                firstUserMessageContent += "\n\nInstructions spécifiques pour cette discussion:\n" + customInstructions;
+            }
+
+            chatHistory.push({ role: 'user', content: firstUserMessageContent });
+            // N'affiche pas le contexte complet, mais un message indiquant son envoi
+            appendMessageToChat('user', "Contexte du projet et instructions initiales envoyés au LLM.");
+
+            chatUiContainer.classList.remove('visually-hidden');
+            startLlmChatBtn.classList.add('visually-hidden');
+            
+            await sendChatHistoryToLlm();
+        });
     }
+
+    if (sendChatMessageBtn) {
+        sendChatMessageBtn.addEventListener('click', () => {
+            const userMessage = chatMessageInput.value.trim();
+            if (userMessage) {
+                chatHistory.push({ role: 'user', content: userMessage });
+                appendMessageToChat('user', userMessage);
+                chatMessageInput.value = '';
+                adjustTextareaHeight(chatMessageInput);
+                sendChatHistoryToLlm();
+            }
+        });
+
+        chatMessageInput.addEventListener('keypress', (event) => {
+            if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault(); 
+                sendChatMessageBtn.click();
+            }
+        });
+        
+        // Ajustement dynamique de la hauteur du textarea
+        chatMessageInput.addEventListener('input', () => adjustTextareaHeight(chatMessageInput));
+        function adjustTextareaHeight(textarea) {
+            textarea.style.height = 'auto'; // Réinitialiser la hauteur
+            textarea.style.height = (textarea.scrollHeight) + 'px'; // Ajuster à la hauteur du contenu
+        }
+        adjustTextareaHeight(chatMessageInput); // Ajuster initialement
+    }
+    
+    // Intégration avec le bouton generateBtn existant
+    if (generateBtn) {
+        const originalGenerateBtnClickHandler = generateBtn.onclick;
+        generateBtn.onclick = async function(event) {
+            if (originalGenerateBtnClickHandler) {
+                // Si vous aviez un onclick direct, il faut le gérer.
+                // Pour addEventListener, c'est plus simple, on ajoute un nouveau listener.
+                // Ici, on suppose qu'on doit appeler l'ancienne logique si elle existe
+                // ou simplement la remplacer par la nouvelle logique fetch.
+            }
+            
+            // Mettre ici la logique fetch qui était dans script.js pour generateBtn
+            // et à la fin, si succès:
+            // if (response.ok && result.success) { ... 
+            //    markdownOutput.value = result.markdown;
+            //    displaySummary(result.summary);
+            //    displaySecretsAlert(result.summary.secrets_masked, result.summary.files_with_secrets, result.markdown);
+            //    resultAndChatArea.classList.remove('visually-hidden');
+            //    if (llmInteractionContainer) llmInteractionContainer.classList.remove('visually-hidden');
+            //    if (startLlmChatBtn) startLlmChatBtn.classList.remove('visually-hidden');
+            //    if (chatUiContainer) chatUiContainer.classList.add('visually-hidden'); // Cacher UI de chat si on régénère
+            // }
+            // Pour l'instant, je ne peux pas réinjecter la logique exacte de script.js ici.
+            // Vous devrez fusionner la logique de génération de contexte existante de script.js
+            // avec la partie ci-dessus pour afficher/cacher les bons conteneurs.
+        };
+    }
+
+    // Supprimer la logique de l'ancien bouton sendToLlmBtn et copyLlmResponseBtn s'ils étaient globaux
+    // ou s'assurer qu'ils sont bien sous le if (llm_feature_enabled) pour éviter les erreurs.
+    // Le nouveau bouton de copie est par message dans appendMessageToChat.
+
   </script>
   {% endif %}
 </body>
