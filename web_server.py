@@ -372,35 +372,6 @@ def build_uploaded_context_string(uploaded_files, root_name="Uploaded_Directory"
     
     return full_context, summary
 
-def should_ignore_path(path, spec):
-    """
-    Determines if a path should be ignored according to the PathSpec.
-    Performs several checks including exact pattern match and checking path segments.
-    """
-    # 1. Check the complete path with pathspec
-    if spec.match_file(path):
-        app.logger.debug(f"File ignored (direct match): {path}")
-        return True
-    
-    # 2. Check if the path contains a directory that is ignored
-    parts = path.split('/')
-    for i in range(1, len(parts)):
-        partial_path_as_dir = '/'.join(parts[:i]) + '/'
-        if spec.match_file(partial_path_as_dir):
-            app.logger.debug(f"File ignored (parent directory ignored): {path}, ignored portion: {partial_path_as_dir}")
-            return True
-        # Also check without trailing slash if some patterns might be defined like that
-        partial_path_as_file_prefix = '/'.join(parts[:i])
-        if spec.match_file(partial_path_as_file_prefix) and any(p.pattern.endswith('/') for p in spec.patterns if partial_path_as_file_prefix == p.pattern.rstrip('/')):
-             app.logger.debug(f"File ignored (parent directory pattern match): {path}, ignored portion: {partial_path_as_file_prefix}")
-             return True
-
-    # 3. Check specific patterns such as __pycache__ (already covered if in .gitignore, but good fallback)
-    if '__pycache__' in path:
-        app.logger.debug(f"File ignored (hardcoded pattern __pycache__): {path}")
-        return True
-    
-    return False
 
 # --- Application routes ---
 
@@ -417,14 +388,7 @@ def index():
 def upload_directory():
     """
     Endpoint to receive the uploaded files from the browser.
-    Expects a JSON of the form:
-    {
-       "files": [
-           {"name": "file1.py", "path": "folder/file1.py", "content": "content..."},
-           ...
-       ]
-    }
-    Applies the .gitignore rules (as in CLI mode) to include only non-ignored files.
+    ...
     """
     if not request.is_json:
         return jsonify({"success": False, "error": "Invalid request format: JSON expected."}), 400
@@ -434,87 +398,88 @@ def upload_directory():
     
     uploaded_files = []
     for file_obj in data["files"]:
-        if not isinstance(file_obj, dict):
-            continue
-        name = file_obj.get("name")
-        path = file_obj.get("path")
-        content = file_obj.get("content")
-        if name and path and content is not None:
-            # Ensure the path is in POSIX style (using "/" only)
-            posix_path = path.replace("\\", "/")
+        if isinstance(file_obj, dict) and all(k in file_obj for k in ["name", "path", "content"]):
+            posix_path = file_obj["path"].replace("\\", "/")
             uploaded_files.append({
-                "name": name,
+                "name": file_obj["name"],
                 "path": posix_path,
-                "content": content
+                "content": file_obj["content"]
             })
+
     if not uploaded_files:
         return jsonify({"success": False, "error": "No valid file received."}), 400
 
-    # Use the same routine as the CLI version for .gitignore
-    # Look for a .gitignore file at the root level (exact path ".gitignore")
-    gitignore_files = [f for f in uploaded_files if f["path"].lower() == ".gitignore"]
-    
-    # Default patterns to always ignore
-    default_patterns = [
-        '.git/',
-        '__pycache__/',
-        '*.pyc',
-        # '.gitignore' # .gitignore itself should not be ignored for parsing, but not included in context
-    ]
-    
+    # --- NOUVELLE LOGIQUE AMÉLIORÉE ---
+
+    # 1. Trouver dynamiquement la racine du projet dans les fichiers uploadés
+    all_paths = [f['path'] for f in uploaded_files]
+    project_root_prefix = ''
+    if all_paths:
+        common_prefix = os.path.commonpath(all_paths)
+        # S'assurer que la racine est un "répertoire" et non un simple préfixe de nom de fichier
+        if common_prefix and any(p.startswith(common_prefix + '/') for p in all_paths):
+             project_root_prefix = common_prefix + '/'
+
+    app.logger.info(f"Detected project root prefix in upload: '{project_root_prefix}'")
+
+    # 2. Chercher et lire le .gitignore à la racine trouvée
+    gitignore_path = f"{project_root_prefix}.gitignore".lstrip('/')
+    gitignore_content = None
+    for f in uploaded_files:
+        if f['path'].lower() == gitignore_path:
+            gitignore_content = f['content']
+            app.logger.info(f"Found .gitignore file at: '{gitignore_path}'")
+            break
+
+    # 3. Construire les règles d'ignorance
+    default_patterns = ['.git/'] # On peut simplifier, .gitignore est maintenant géré
     all_patterns = default_patterns.copy()
-    
-    if gitignore_files:
-        gitignore_content = gitignore_files[0]["content"]
-        # Clean lines: remove spaces, comments, empty lines
+    if gitignore_content:
         lines = [line.strip() for line in gitignore_content.splitlines() if line.strip() and not line.strip().startswith("#")]
         all_patterns.extend(lines)
-    
+    else:
+        app.logger.warning(f"Could not find .gitignore at path '{gitignore_path}'. Using default patterns only.")
+        
     try:
         spec = pathspec.PathSpec.from_lines(GitWildMatchPattern, all_patterns)
-        app.logger.info(f".gitignore loaded with {len(spec.patterns)} rules.")
+        app.logger.info(f"Pathspec loaded with {len(spec.patterns)} total rules.")
         analysis_cache["ignored_patterns"] = all_patterns
     except Exception as e:
-        app.logger.error(f"Error loading .gitignore: {e}")
-        spec = pathspec.PathSpec([]) # fallback to empty spec
-        analysis_cache["ignored_patterns"] = []
+        app.logger.error(f"Error creating PathSpec: {e}")
+        spec = pathspec.PathSpec.from_lines(GitWildMatchPattern, default_patterns)
+        analysis_cache["ignored_patterns"] = default_patterns
 
-    # Filter files by excluding those that match the .gitignore rules (applied on the relative POSIX path)
+    # 4. Appliquer le filtre sur les chemins relatifs à la racine trouvée
     filtered_files = []
-    ignored_files_paths = [] # Store paths of ignored files for logging
+    ignored_files_paths = []
     
-    # Ensure .gitignore itself is not included in the context even if not explicitly in patterns
-    # (it's used for rules, not usually for LLM context directly unless specified)
-    # However, our current logic would select it if user checks it.
-    # For now, we let the user decide. `default_patterns` could include '.gitignore' to force exclusion.
-
     for file_obj in uploaded_files:
-        path_to_check = file_obj["path"]
-        # Special handling for .gitignore itself: always parse it, but exclude from final list for context generation
-        if path_to_check.lower() == ".gitignore":
-            if path_to_check not in ignored_files_paths:
-                 ignored_files_paths.append(path_to_check) # Log as "ignored" for context
-            continue # Skip adding .gitignore to filtered_files
-
-        if should_ignore_path(path_to_check, spec):
-            if path_to_check not in ignored_files_paths:
-                ignored_files_paths.append(path_to_check)
+        # Obtenir le chemin relatif à la racine du projet détectée
+        relative_path = file_obj['path'].removeprefix(project_root_prefix)
+        
+        if spec.match_file(relative_path):
+            ignored_files_paths.append(file_obj['path']) # loguer le chemin complet
         else:
+            # Conserver le fichier avec son chemin normalisé pour l'affichage
+            file_obj['path'] = relative_path # On utilise maintenant le chemin relatif pour la suite
             filtered_files.append(file_obj)
-    
-    app.logger.info(f"Ignored files for context ({len(ignored_files_paths)}): {', '.join(ignored_files_paths[:10])}{'...' if len(ignored_files_paths) > 10 else ''}")
-    app.logger.info(f"Upload successful: {len(filtered_files)} files kept for selection after applying .gitignore rules.")
-    
-    analysis_cache["uploaded_files"] = filtered_files # Store only files available for selection
+            
+    # --- FIN DE LA NOUVELLE LOGIQUE ---
 
-    file_tree_data = [{"path": f["path"]} for f in filtered_files] # Data for client-side tree
+    app.logger.info(f"Ignored files for context ({len(ignored_files_paths)}): {', '.join(ignored_files_paths[:5])}{'...' if len(ignored_files_paths) > 5 else ''}")
+    app.logger.info(f"Upload successful: {len(filtered_files)} files kept for selection after applying rules.")
+    
+    analysis_cache["uploaded_files"] = filtered_files # Stocker les fichiers avec leur chemin relatif corrigé
+
+    # La structure pour le rendu de l'arbre utilise maintenant les chemins relatifs
+    file_tree_data = [{"path": f["path"]} for f in filtered_files]
     
     return jsonify({
-        "success": True, 
-        "files": file_tree_data, # Files to display in tree
+        "success": True,
+        "files": file_tree_data,
         "debug": {
             "ignored_patterns_used": analysis_cache["ignored_patterns"],
-            "ignored_files_log": ignored_files_paths, # Log of files ignored
+            "ignored_files_log": ignored_files_paths,
             "final_selectable_files_count": len(filtered_files)
         }
     })
