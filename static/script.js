@@ -19,6 +19,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const fileListDiv = document.getElementById('fileList');
     const selectAllBtn = document.getElementById('selectAllBtn');
     const deselectAllBtn = document.getElementById('deselectAllBtn');
+    const selectMdCheckbox = document.getElementById('selectMdCheckbox');
+    const selectDevCheckbox = document.getElementById('selectDevCheckbox');
 
     const generationSection = document.getElementById('generation-section');
     const generateBtn = document.getElementById('generateBtn');
@@ -151,6 +153,10 @@ document.addEventListener('DOMContentLoaded', () => {
         currentFilesData = [];
         includedFilePaths = [];
 
+        // Réinitialiser les cases à cocher de sélection rapide
+        if (selectMdCheckbox) selectMdCheckbox.checked = false;
+        if (selectDevCheckbox) selectDevCheckbox.checked = false;
+
         // Réinitialiser l'état des boutons de génération/régénération
         showElement(generateBtn);
         hideElement(regenerateBtn);
@@ -216,9 +222,28 @@ document.addEventListener('DOMContentLoaded', () => {
                 showElement(generationSection);
                 await executeActualGeneration(); // Automatically generate context
             } else {
-                // Normal analysis flow: select all by default (or existing logic)
-                // Ensure all files are checked by default in the new tree
-                selectAllBtn.click(); // Simulate click to check all new files
+                // Normal analysis flow: select all by default, then uncheck dev files
+                selectAllBtn.click(); // 1. Check all files initially
+
+                // 2. Uncheck dev files by default
+                fileListDiv.querySelectorAll('.form-check-input').forEach(checkbox => {
+                    if (isDevFile(checkbox.value)) {
+                        checkbox.checked = false;
+                        // If it's a folder, ensure its children are also unchecked
+                        const parentLi = checkbox.closest('li.folder');
+                        if (parentLi) {
+                            parentLi.querySelectorAll('ul .form-check-input').forEach(child => {
+                                child.checked = false;
+                            });
+                        }
+                    }
+                });
+
+                // 3. Update parent folder states after the default uncheck
+                fileListDiv.querySelectorAll('li.file .form-check-input').forEach(fileCheckbox => {
+                    updateParentCheckboxes(fileCheckbox);
+                });
+
                 showElement(fileSelectionSection);
                 showElement(generationSection);
             }
@@ -328,12 +353,18 @@ document.addEventListener('DOMContentLoaded', () => {
             const checkbox = event.target;
             const isChecked = checkbox.checked;
             const parentLi = checkbox.closest('li');
+
+            // Propagate change downwards to children if it's a folder
             if (parentLi && parentLi.classList.contains('folder')) {
                 const childCheckboxes = parentLi.querySelectorAll('ul .form-check-input');
                 childCheckboxes.forEach(child => {
                     child.checked = isChecked;
+                    child.indeterminate = false; // When parent is clicked, children are not indeterminate
                 });
             }
+
+            // Propagate change upwards to parents
+            updateParentCheckboxes(checkbox);
         }
     });
 
@@ -347,6 +378,106 @@ document.addEventListener('DOMContentLoaded', () => {
             cb.checked = false;
         });
     });
+
+    function updateParentCheckboxes(element) {
+        const parentLi = element.closest('li');
+        if (!parentLi) return;
+
+        const parentUl = parentLi.parentElement;
+        if (!parentUl) return;
+
+        const folderLi = parentUl.closest('li.folder');
+        if (!folderLi) return; // Reached the root
+
+        const folderCheckbox = folderLi.querySelector(':scope > .form-check > .form-check-input');
+        if (!folderCheckbox) return;
+
+        const childCheckboxes = Array.from(parentUl.querySelectorAll(':scope > li > .form-check > .form-check-input'));
+        if (childCheckboxes.length === 0) return;
+
+        const totalChildren = childCheckboxes.length;
+        const checkedChildren = childCheckboxes.filter(cb => cb.checked).length;
+        const indeterminateChildren = childCheckboxes.filter(cb => cb.indeterminate).length;
+
+        if (checkedChildren === 0 && indeterminateChildren === 0) {
+            folderCheckbox.checked = false;
+            folderCheckbox.indeterminate = false;
+        } else if (checkedChildren === totalChildren && indeterminateChildren === 0) {
+            folderCheckbox.checked = true;
+            folderCheckbox.indeterminate = false;
+        } else {
+            folderCheckbox.checked = false;
+            folderCheckbox.indeterminate = true;
+        }
+
+        // Recurse up the tree
+        updateParentCheckboxes(folderCheckbox);
+    }
+
+    // --- Logique pour les nouvelles cases à cocher de sélection rapide ---
+
+    function isDevFile(filePath) {
+        const devPatterns = [
+            // Fichiers de dépendances et config
+            'requirements.txt', 'requirements-dev.txt', 'pyproject.toml', 'package.json', 'pnpm-lock.yaml',
+            // Fichiers de config
+            '.gitignore', '.dockerignore', '.editorconfig', 'config.ini', 'config.ini.template',
+            // Scripts
+            '.sh', '.bat', '.ps1',
+            // CI/CD
+            'Dockerfile', 'docker-compose.yml', '.github/', '.gitlab-ci.yml',
+            // Documentation et licence
+            '.md', 'LICENSE', 'CONTRIBUTING', 'docs/',
+            // Tests
+            'tests/', 'tests_e2e/',
+            // Templates
+            '.template'
+        ];
+
+        // Vérifie les extensions et noms de fichiers exacts
+        if (devPatterns.some(pattern => pattern.startsWith('.') && filePath.endsWith(pattern))) {
+            return true;
+        }
+        // Vérifie les noms de fichiers exacts
+        if (devPatterns.some(pattern => !pattern.startsWith('.') && !pattern.endsWith('/') && filePath.endsWith(pattern))) {
+            return true;
+        }
+        // Vérifie les répertoires
+        if (devPatterns.some(pattern => pattern.endsWith('/') && filePath.startsWith(pattern))) {
+            return true;
+        }
+        return false;
+    }
+
+    if (selectDevCheckbox) {
+        selectDevCheckbox.addEventListener('change', (event) => {
+            const isChecked = event.target.checked;
+            fileListDiv.querySelectorAll('.form-check-input').forEach(checkbox => {
+                if (isDevFile(checkbox.value)) {
+                    checkbox.checked = isChecked;
+                }
+            });
+            // After changing, update all parent folder states
+            fileListDiv.querySelectorAll('li.file .form-check-input').forEach(fileCheckbox => {
+                updateParentCheckboxes(fileCheckbox);
+            });
+        });
+    }
+
+    if (selectMdCheckbox) {
+        selectMdCheckbox.addEventListener('change', (event) => {
+            const isChecked = event.target.checked;
+            fileListDiv.querySelectorAll('.form-check-input').forEach(checkbox => {
+                if (checkbox.value.endsWith('.md')) {
+                    checkbox.checked = isChecked;
+                }
+            });
+            // After changing, update all parent folder states
+            fileListDiv.querySelectorAll('li.file .form-check-input').forEach(fileCheckbox => {
+                updateParentCheckboxes(fileCheckbox);
+            });
+        });
+    }
 
     // Function to format numbers with thousands separators
     function formatNumber(num) {

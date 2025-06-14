@@ -378,11 +378,12 @@ def build_uploaded_context_string(uploaded_files, root_name="Uploaded_Directory"
 @app.route('/')
 def index():
     app.logger.info("Received request for '/' - Serving index.html")
-    return render_template('index.html', 
-                           instruction_text_1=INSTRUCTION_TEXT_1, 
+    return render_template('index.html',
+                           instruction_text_1=INSTRUCTION_TEXT_1,
                            instruction_text_2=INSTRUCTION_TEXT_2,
                            llm_feature_enabled=LLM_SERVER_ENABLED,
-                           llm_stream_response_enabled=LLM_SERVER_STREAM_RESPONSE)
+                           llm_stream_response_enabled=LLM_SERVER_STREAM_RESPONSE,
+                           has_md_files=analysis_cache.get('has_md_files', False))
 
 @app.route('/upload', methods=['POST'])
 def upload_directory():
@@ -470,6 +471,11 @@ def upload_directory():
     app.logger.info(f"Upload successful: {len(filtered_files)} files kept for selection after applying rules.")
     
     analysis_cache["uploaded_files"] = filtered_files # Stocker les fichiers avec leur chemin relatif corrigé
+
+    # Détecter la présence de fichiers Markdown
+    has_md_files = any(f['path'].lower().endswith('.md') for f in filtered_files)
+    analysis_cache['has_md_files'] = has_md_files
+    app.logger.info(f"Markdown files detected: {has_md_files}")
 
     # La structure pour le rendu de l'arbre utilise maintenant les chemins relatifs
     file_tree_data = [{"path": f["path"]} for f in filtered_files]
