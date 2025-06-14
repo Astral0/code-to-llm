@@ -15,6 +15,35 @@ document.addEventListener('DOMContentLoaded', () => {
     const insertInstructionBtn2 = document.getElementById('insertInstructionBtn2');
     const regenerateBtn = document.getElementById('regenerateBtn');
 
+    // NOUVEAU: Références pour les options de compression
+    const compressionOptionsBtn = document.getElementById('compressionOptionsBtn');
+    const compressionLabel = document.getElementById('compressionLabel');
+    const compressionValue = document.getElementById('compressionValue');
+    const compressionMenu = document.querySelector('.dropdown-menu[aria-labelledby="compressionOptionsBtn"]');
+// NOUVEAU: Gestionnaire d'événements pour les options de compression
+    if (compressionMenu) {
+        compressionMenu.addEventListener('click', (event) => {
+            // S'assurer qu'on a cliqué sur un élément du menu
+            const target = event.target;
+            if (target.classList.contains('dropdown-item')) {
+                // Empêcher le comportement par défaut du lien (remonter en haut de page)
+                event.preventDefault();
+
+                // Récupérer la valeur et le texte
+                const selectedValue = target.dataset.value;
+                const selectedText = target.textContent.split('(')[0].trim(); // "Aucune (Défaut)" -> "Aucune"
+
+                // Mettre à jour les éléments de l'interface
+                if (compressionValue) {
+                    compressionValue.value = selectedValue;
+                }
+                if (compressionLabel) {
+                    compressionLabel.textContent = selectedText;
+                }
+            }
+        });
+    }
+
     const fileSelectionSection = document.getElementById('file-selection-section');
     const fileListDiv = document.getElementById('fileList');
     const selectAllBtn = document.getElementById('selectAllBtn');
@@ -42,6 +71,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let includedFilePaths = []; // Will store only the included file paths (not ignored by gitignore)
     let selectionToPreserveForRegeneration = new Set();
     let isRegeneratingFlowActive = false;
+    let compressionModeToPreserve = 'none'; // Nouvelle variable pour préserver le mode de compression
 
     let chatHistory = []; // Stocke l'historique : [{role: 'user'/'assistant', content: '...'}, ...]
     let currentAssistantMessageDiv = null; // Pour le streaming
@@ -161,6 +191,13 @@ document.addEventListener('DOMContentLoaded', () => {
         showElement(generateBtn);
         hideElement(regenerateBtn);
 
+        // Si c'est une régénération, préserver le mode de compression actuel
+        if (isRegeneratingFlowActive) {
+            compressionModeToPreserve = compressionValue.value;
+        } else {
+            compressionModeToPreserve = 'none'; // Réinitialiser pour un nouveau flux
+        }
+
         // Read all files using FileReader and retrieve their full relative path
         const readFilePromises = [];
         for (let i = 0; i < files.length; i++) {
@@ -220,6 +257,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 showElement(fileSelectionSection);
                 showElement(generationSection);
+                // Restaurer le mode de compression après l'analyse
+                compressionValue.value = compressionModeToPreserve;
+                // Mettre à jour le label affiché
+                const selectedOption = compressionMenu.querySelector(`[data-value="${compressionModeToPreserve}"]`);
+                if (selectedOption) {
+                    compressionLabel.textContent = selectedOption.textContent.split('(')[0].trim();
+                }
+                compressionModeToPreserve = 'none'; // Réinitialiser après utilisation
                 await executeActualGeneration(); // Automatically generate context
             } else {
                 // Normal analysis flow: select all by default, then uncheck dev files
@@ -566,15 +611,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Récupérer les instructions
         const instructions = instructionsTextarea.value;
+        const selectedCompression = compressionValue.value; // Déclaration de la variable manquante
 
         try {
             const response = await fetch('/generate', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ 
-                    selected_files: selectedFiles, 
+                body: JSON.stringify({
+                    selected_files: selectedFiles,
                     masking_options: maskingOptions,
-                    instructions: instructions
+                    instructions: instructions,
+                    compression_mode: selectedCompression
                 })
             });
             const result = await response.json();

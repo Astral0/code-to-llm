@@ -10,6 +10,8 @@ import re
 import configparser
 import requests
 import json
+import concurrent.futures # Ajout de l'import pour la parallélisation
+import threading # Ajout de l'import pour le verrou
 
 app = Flask(__name__, template_folder='templates', static_folder='static')
 
@@ -28,9 +30,20 @@ LLM_SERVER_ENABLED = False
 LLM_SERVER_API_TYPE = "openai" # Default to openai
 LLM_SERVER_STREAM_RESPONSE = False # Nouvelle variable globale
 
+# --- Configuration du LLM de Résumé ---
+SUMMARIZER_LLM_URL = None
+SUMMARIZER_LLM_APIKEY = None
+SUMMARIZER_LLM_MODEL = None
+SUMMARIZER_LLM_ENABLED = False
+SUMMARIZER_LLM_API_TYPE = "ollama" # Default to ollama for summarizer
+SUMMARIZER_LLM_PROMPT = "" # Sera chargé depuis config.ini
+SUMMARIZER_LLM_TIMEOUT = 120 # Default timeout for summarizer LLM calls
+SUMMARIZER_MAX_WORKERS = 10 # Default max workers for summarizer thread pool
+
 def load_config():
     global INSTRUCTION_TEXT_1, INSTRUCTION_TEXT_2
     global LLM_SERVER_URL, LLM_SERVER_APIKEY, LLM_SERVER_MODEL, LLM_SERVER_ENABLED, LLM_SERVER_API_TYPE, LLM_SERVER_STREAM_RESPONSE
+    global SUMMARIZER_LLM_URL, SUMMARIZER_LLM_APIKEY, SUMMARIZER_LLM_MODEL, SUMMARIZER_LLM_ENABLED, SUMMARIZER_LLM_API_TYPE, SUMMARIZER_LLM_PROMPT, SUMMARIZER_LLM_TIMEOUT, SUMMARIZER_MAX_WORKERS
     config = configparser.ConfigParser()
     try:
         if os.path.exists('config.ini'):
@@ -52,6 +65,65 @@ def load_config():
                     app.logger.info("Fonctionnalité LLM désactivée dans config.ini.")
             else:
                 app.logger.info("Section [LLMServer] non trouvée dans config.ini. Fonctionnalité LLM désactivée.")
+            
+            if 'SummarizerLLM' in config:
+                SUMMARIZER_LLM_ENABLED = config.getboolean('SummarizerLLM', 'enabled', fallback=False)
+                if SUMMARIZER_LLM_ENABLED:
+                    SUMMARIZER_LLM_URL = config.get('SummarizerLLM', 'url', fallback=None)
+                    SUMMARIZER_LLM_APIKEY = config.get('SummarizerLLM', 'apikey', fallback=None) # Conserver car présent dans template
+                    SUMMARIZER_LLM_MODEL = config.get('SummarizerLLM', 'model', fallback=None)
+                    SUMMARIZER_LLM_API_TYPE = config.get('SummarizerLLM', 'api_type', fallback='ollama').lower()
+                    SUMMARIZER_LLM_PROMPT = config.get('SummarizerLLM', 'summarizer_prompt', fallback='''Tu es un assistant d'analyse de code spécialisé. Ta seule et unique tâche est de générer un résumé JSON à partir d'un fichier de code source, en suivant un format STRICT et IMPÉRATIF.
+ 
+ --- DEBUT DE L'EXEMPLE ---
+ [CODE INPUT]
+ ```python
+ #
+ # hello.py
+ #
+ def say_hello(name):
+     print(f"Hello, {{name}}!")
+ 
+ if __name__ == "__main__":
+     say_hello("World")
+ ```
+ 
+ [JSON OUTPUT]
+ ```json
+ {{
+   "file_purpose": "Script simple pour afficher un message de salutation.",
+   "core_logic": [
+     "Définit une fonction `say_hello` qui prend un nom en paramètre et l'affiche.",
+     "Appelle la fonction `say_hello` avec 'World' si le script est exécuté directement."
+   ],
+   "key_interactions": [
+     "Aucune interaction externe, utilise uniquement des fonctions natives de Python."
+   ],
+   "tech_stack": [
+     "Python"
+   ]
+ }}
+ ```
+ --- FIN DE L'EXEMPLE ---
+ 
+ Maintenant, applique exactement le même processus au code suivant. Le format de sortie doit être EXCLUSIVEMENT un objet JSON valide avec les clés "file_purpose", "core_logic", "key_interactions", et "tech_stack". NE PAS inventer d'autres clés ou structures. Si tu ne parviens pas à analyser le fichier pour une raison quelconque, retourne un objet JSON avec une seule clé "error" décrivant le problème (e.g., {{"error": "Le fichier est trop long."}}).
+ 
+ Analyse le code du fichier `{file_path}` ci-dessous et génère le JSON correspondant.
+ 
+ Code du fichier `{file_path}`:
+ ---
+ {content}
+ ---
+ 
+ Rappel : Ton unique sortie doit être un objet JSON valide respectant la structure de l'exemple.
+ ''')
+                    SUMMARIZER_LLM_TIMEOUT = config.getint('SummarizerLLM', 'summarizer_timeout_seconds', fallback=SUMMARIZER_LLM_TIMEOUT)
+                    SUMMARIZER_MAX_WORKERS = config.getint('SummarizerLLM', 'summarizer_max_workers', fallback=SUMMARIZER_MAX_WORKERS)
+                    app.logger.info(f"Configuration du Summarizer LLM chargée (Modèle: {SUMMARIZER_LLM_MODEL}).")
+                else:
+                    app.logger.info("Fonctionnalité LLM de Résumé désactivée dans config.ini.")
+            else:
+                app.logger.info("Section [SummarizerLLM] non trouvée. La compression par IA sera désactivée.")
         else:
             app.logger.warning("config.ini non trouvé, utilisation des instructions par défaut.")
     except Exception as e:
@@ -207,6 +279,18 @@ def detect_and_redact_with_regex(content, file_path):
     redacted_content = "\n".join(redacted_lines)
     
     return redacted_content, count
+
+def compact_code(content: str) -> str:
+    """Supprime les commentaires et lignes vides d'un bloc de code."""
+    # Supprimer les commentaires sur une seule ligne (en gérant les # dans les chaînes de caractères)
+    content = re.sub(r'(?m)^ *#.*\n?', '', content)
+    # Supprimer les docstrings multilignes """..."""
+    content = re.sub(r'""".*?"""', '', content, flags=re.DOTALL)
+    # Supprimer les docstrings multilignes '''...'''
+    content = re.sub(r"'''.*?'''", '', content, flags=re.DOTALL)
+    # Supprimer les lignes vides résultantes
+    lines = [line for line in content.splitlines() if line.strip()]
+    return "\n".join(lines)
 
 # --- Utility functions to build the tree and context ---
 
@@ -383,6 +467,7 @@ def index():
                            instruction_text_2=INSTRUCTION_TEXT_2,
                            llm_feature_enabled=LLM_SERVER_ENABLED,
                            llm_stream_response_enabled=LLM_SERVER_STREAM_RESPONSE,
+                           summarizer_llm_enabled=SUMMARIZER_LLM_ENABLED,
                            has_md_files=analysis_cache.get('has_md_files', False))
 
 @app.route('/upload', methods=['POST'])
@@ -503,13 +588,15 @@ def generate_context():
     mask_mode = masking_options.get("mask_mode", "mask")
     
     instructions = data.get("instructions", "")
+    compression_mode = data.get("compression_mode", "none") # Récupérer le mode de compression
     
     app.logger.info(f"Secret masking: {'enabled' if enable_masking else 'disabled'}, mode: {mask_mode}")
     app.logger.info(f"Instructions reçues: {instructions[:100]}{'...' if len(instructions) > 100 else ''}")
+    app.logger.info(f"Compression mode selected: {compression_mode}")
     
     selected_paths = data["selected_files"]
     # analysis_cache["uploaded_files"] now contains only non-ignored files
-    all_selectable_files = analysis_cache.get("uploaded_files", []) 
+    all_selectable_files = analysis_cache.get("uploaded_files", [])
     
     if not all_selectable_files and selected_paths : # Check if selectable files list is empty but user selected some (should not happen)
          app.logger.warning("User selected files, but the list of selectable files is empty. Re-analyze might be needed.")
@@ -520,10 +607,47 @@ def generate_context():
     context_files = [f for f in all_selectable_files if f["path"] in selected_paths]
     if not context_files: # No files selected or selection is empty
         # check if selected_paths was non-empty, means selection led to 0 files from selectable ones
-        if selected_paths: 
+        if selected_paths:
              app.logger.warning(f"User selected paths {selected_paths}, but these did not match any available selectable files.")
         return jsonify({"success": False, "error": "No files selected or selection did not match available files."}), 400
         
+    # Appliquer la compression si le mode est "compact"
+    if compression_mode == "compact":
+        app.logger.info("Applying 'Compact Mode' compression.")
+        for file_obj in context_files:
+            if file_obj['content']: # Ne pas traiter un contenu vide
+                file_obj['content'] = compact_code(file_obj['content'])
+
+    # Appliquer la compression si le mode est "compact"
+    if compression_mode == "compact":
+        app.logger.info("Applying 'Compact Mode' compression.")
+        for file_obj in context_files:
+            if file_obj['content']: # Ne pas traiter un contenu vide
+                file_obj['content'] = compact_code(file_obj['content'])
+    elif compression_mode == "summarize":
+        app.logger.info("Applying 'Summarize with AI' compression.")
+        
+        summaries = {}
+        with concurrent.futures.ThreadPoolExecutor(max_workers=SUMMARIZER_MAX_WORKERS) as executor:
+            future_to_file = {executor.submit(summarize_code_with_llm, f['content'], f['path']): f for f in context_files}
+            for future in concurrent.futures.as_completed(future_to_file):
+                file_obj = future_to_file[future]
+                try:
+                    summaries[file_obj['path']] = future.result()
+                except Exception as exc:
+                    app.logger.error(f"Future for {file_obj['path']} generated an exception: {exc}")
+                    summaries[file_obj['path']] = f"### [ERROR generating summary for {file_obj['path']}]"
+    
+        # Ordonner les résumés comme les fichiers d'origine
+        all_summaries_content = "\n\n---\n\n".join(summaries[f['path']] for f in context_files)
+        summary_file = {
+            "path": "AI_GENERATED_PROJECT_SUMMARY.md",
+            "name": "AI_GENERATED_PROJECT_SUMMARY.md",
+            "content": all_summaries_content
+        }
+        # Remplacer la liste des fichiers par le seul fichier de résumé
+        context_files = [summary_file]
+
     markdown_context, summary = build_uploaded_context_string(
         uploaded_files=context_files, # Use the user-selected files
         root_name="Uploaded_Directory",
@@ -723,3 +847,109 @@ if __name__ == '__main__':
             sys.exit(1)
             
     app.run(host=host, port=port, debug=True)
+
+def summarize_code_with_llm(content: str, file_path: str) -> str:
+    """Appelle le LLM de résumé pour obtenir un résumé du code en utilisant l'endpoint /api/generate."""
+    if not SUMMARIZER_LLM_ENABLED or not SUMMARIZER_LLM_URL or not SUMMARIZER_LLM_MODEL:
+        return f"### [SUMMARIZER NOT CONFIGURED FOR {file_path}]"
+
+    prompt = SUMMARIZER_LLM_PROMPT.format(file_path=file_path, content=content)
+    
+    headers = {"Content-Type": "application/json"}
+    # Payload pour l'endpoint /api/generate d'Ollama
+    payload = {
+        "model": SUMMARIZER_LLM_MODEL,
+        "prompt": prompt,
+        "format": "json",
+        "stream": False
+    }
+    
+    try:
+        target_url = SUMMARIZER_LLM_URL
+        # Normalisation de l'URL pour /api/generate
+        if SUMMARIZER_LLM_API_TYPE == "ollama":
+            normalized_url = target_url.rstrip('/')
+            ollama_suffix = "api/generate"  # Utiliser l'endpoint de génération
+            if not normalized_url.endswith(ollama_suffix):
+                target_url = f"{normalized_url}/{ollama_suffix}"
+            else:
+                target_url = normalized_url
+        
+        app.logger.info(f"Calling Summarizer API (Ollama) at URL: {target_url}")
+        response = requests.post(target_url, headers=headers, json=payload, timeout=SUMMARIZER_LLM_TIMEOUT)
+        response.raise_for_status()
+        summary_json = response.json()
+        llm_response_str = summary_json.get('response', '{}')
+        app.logger.info(f"LLM summarizer raw response for {file_path}: {llm_response_str}")
+
+        if not llm_response_str.strip():
+            app.logger.warning(f"LLM summarizer returned an empty response for {file_path}.")
+            summary_content = {}
+        else:
+            summary_content = json.loads(llm_response_str)
+
+        if 'error' in summary_content:
+            app.logger.error(f"LLM returned an error for {file_path}: {summary_content['error']}")
+            return f"### [SUMMARY FAILED for {file_path}]\n\n*LLM Error: {summary_content['error']}*"
+
+        formatted_summary = (
+            f"### Résumé de `{file_path}`\n\n"
+            f"**Objectif:** {summary_content.get('file_purpose', 'N/A')}\n\n"
+            f"**Logique principale:**\n- {'\n- '.join(summary_content.get('core_logic', ['N/A']))}\n\n"
+            f"**Interactions clés:**\n- {'\n- '.join(summary_content.get('key_interactions', ['N/A']))}\n\n"
+            f"**Stack technique:** {', '.join(summary_content.get('tech_stack', ['N/A']))}"
+        )
+        return formatted_summary
+    except json.JSONDecodeError as e:
+        app.logger.error(f"Failed to decode JSON from LLM for {file_path}. Error: {e}. Raw response was: {llm_response_str}")
+        return f"### [SUMMARY FAILED for {file_path}]\n\n*Error: LLM returned invalid JSON*"
+    except Exception as e:
+        app.logger.error(f"Error summarizing {file_path}: {e}")
+        return f"### [SUMMARY FAILED for {file_path}]\n\n*Error: {e}*"
+
+@app.route('/summarize_code', methods=['POST'])
+def summarize_code():
+    if not SUMMARIZER_LLM_ENABLED:
+        return jsonify({"error": "Summarizer LLM feature is not enabled in config.ini"}), 400
+
+    if not SUMMARIZER_LLM_URL or not SUMMARIZER_LLM_MODEL or \
+       (SUMMARIZER_LLM_API_TYPE != "ollama" and not SUMMARIZER_LLM_APIKEY):
+        app.logger.error(f"Summarizer LLM server configuration incomplete. URL: {SUMMARIZER_LLM_URL}, Model: {SUMMARIZER_LLM_MODEL}, APIKey set: {bool(SUMMARIZER_LLM_APIKEY)}, Type: {SUMMARIZER_LLM_API_TYPE}")
+        return jsonify({"error": "Summarizer LLM server configuration is incomplete in config.ini"}), 400
+
+    data = request.get_json()
+    code_to_summarize = data.get('code')
+    if not code_to_summarize:
+        return jsonify({"error": "No code provided for summarization"}), 400
+
+    app.logger.info(f"Sending code to summarizer LLM (Type: {SUMMARIZER_LLM_API_TYPE}).")
+
+    headers = {"Content-Type": "application/json"}
+    if SUMMARIZER_LLM_APIKEY and SUMMARIZER_LLM_API_TYPE != "ollama":
+        headers["Authorization"] = f"Bearer {SUMMARIZER_LLM_APIKEY}"
+
+    # Utiliser la fonction centralisée pour obtenir le résumé
+    try:
+        summary = summarize_code_with_llm(code_to_summarize, "test_code_snippet")
+        # La fonction retourne déjà un formatage, mais pour un test API, on peut vouloir le JSON brut
+        # Pour l'instant, on retourne le résumé formaté pour être cohérent
+        if "SUMMARY FAILED" in summary or "NOT CONFIGURED" in summary:
+             return jsonify({"error": "Failed to get summary from LLM.", "details": summary}), 500
+        
+        return jsonify({"summary": summary})
+
+    except requests.exceptions.HTTPError as http_err:
+        error_details = "Unknown error"
+        try:
+            error_details = http_err.response.json()
+        except json.JSONDecodeError:
+            error_details = http_err.response.text
+        app.logger.error(f"HTTP error calling Summarizer LLM: {http_err} - Details: {error_details}")
+        return jsonify({"error": f"HTTP error: {http_err}", "details": error_details}), \
+               http_err.response.status_code if http_err.response else 500
+    except requests.exceptions.RequestException as req_err:
+        app.logger.error(f"Request exception calling Summarizer LLM: {req_err}")
+        return jsonify({"error": f"Request error: {str(req_err)}"}), 500
+    except Exception as e:
+        app.logger.error(f"Unexpected error in summarize_code: {e}", exc_info=True)
+        return jsonify({"error": f"Unexpected server error: {str(e)}"}), 500

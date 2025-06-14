@@ -88,6 +88,20 @@
           </div>
         </div>
         <div class="d-flex align-items-center mb-3">
+          <!-- NOUVEAU: Options de Compression -->
+          <div class="dropdown me-2">
+              <button class="btn btn-outline-secondary dropdown-toggle" type="button" id="compressionOptionsBtn" data-bs-toggle="dropdown" aria-expanded="false" title="Choisir une méthode pour réduire la taille du contexte.">
+                  <i class="fas fa-compress-alt"></i> Compression: <span id="compressionLabel">Aucune</span>
+              </button>
+              <ul class="dropdown-menu" aria-labelledby="compressionOptionsBtn">
+                  <li><a class="dropdown-item" href="#" data-value="none">Aucune (Défaut)</a></li>
+                  <li><a class="dropdown-item" href="#" data-value="compact">Mode Compact (Rapide, sans perte)</a></li>
+                  {% if summarizer_llm_enabled %}
+                  <li><a class="dropdown-item" href="#" data-value="summarize">Résumé par IA (Lent, avec perte)</a></li>
+                  {% endif %}
+              </ul>
+              <input type="hidden" id="compressionValue" value="none">
+          </div>
           <button class="btn btn-success" id="generateBtn" title="Generate context for selected files">
             <i class="fas fa-play"></i> Generate context for selection
           </button>
