@@ -123,6 +123,27 @@
             <span class="visually-hidden">Generating...</span>
           </div>
         </div>
+        <!-- Options de résumé sur une nouvelle ligne -->
+        <div id="summarizer-options" class="d-flex align-items-center d-none mb-3 ps-2">
+            {% if summarizer_llm_models_list %}
+            <div class="me-3">
+                <label for="summarizerModelSelect" class="form-label-sm me-1">Summarizer Model:</label>
+                <select class="form-select form-select-sm" id="summarizerModelSelect" title="Select the summarizer model">
+                    {% for model in summarizer_llm_models_list %}
+                    <option value="{{ model }}" {% if model == SUMMARIZER_LLM_MODEL %}selected{% endif %}>{{ model }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            {% endif %}
+            <div class="me-2">
+                <label for="summarizerWorkersSelect" class="form-label-sm me-1">Parallel calls:</label>
+                <select class="form-select form-select-sm" id="summarizerWorkersSelect" title="Number of parallel summarization requests">
+                    {% for i in range(1, 11) %}
+                    <option value="{{ i }}" {% if i == summarizer_max_workers %}selected{% endif %}>{{ i }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
         <div id="generate-error" class="alert alert-danger p-2 visually-hidden" role="alert" style="font-size: 0.9em;"></div>
         
         <div id="resultAndChatArea" class="mt-3 visually-hidden"> <!-- Combined Area -->

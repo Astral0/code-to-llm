@@ -19,18 +19,8 @@ model = llama3:70b # Modèle puissant pour le résumé
 api_type = ollama
 enabled = true # Doit être activé pour que la fonction de résumé fonctionne
 summarizer_prompt = Tu es un expert en analyse de code source. Analyse le fichier `{file_path}` et fournis un résumé concis au format JSON. Le format de sortie doit être EXCLUSIVEMENT un objet JSON valide.\n\nInstructions pour chaque clé :\n- "role": Décris en une phrase le rôle principal du fichier (ex: "Serveur web Flask pour l'application principale", "Logique frontend pour l'interaction utilisateur", "Module de construction de contexte LLM").\n- "public_interface": Liste les fonctions, classes, ou endpoints API principaux qui sont destinés à être utilisés par d'autres parties du code. Sois concis. Pour du HTML, liste les sections principales. Pour du CSS, les classes majeures.\n- "dependencies": Liste les modules ou fichiers importés qui sont essentiels à ce fichier.\n\nCode du fichier `{file_path}`:\n---\n{content}\n---
-
-[SummarizerLLM]
-# LLM pour le RESUME du code (compression "lossy")
-# Peut être différent du LLM de chat. Ex: un modèle spécialisé en code.
-url = http://localhost:11434 # Pointe vers votre instance Ollama locale
-apikey = YOUR_LLM_API_KEY_HERE
-model = llama3:70b # Modèle puissant pour le résumé
-api_type = ollama
-enabled = true # Doit être activé pour que la fonction de résumé fonctionne
-summarizer_prompt = Tu es un expert en analyse de code source. Analyse le fichier `{file_path}` et fournis un résumé concis au format JSON. Le format de sortie doit être EXCLUSIVEMENT un objet JSON valide.\n\nInstructions pour chaque clé :\n- "role": Décris en une phrase le rôle principal du fichier (ex: "Serveur web Flask pour l'application principale", "Logique frontend pour l'interaction utilisateur", "Module de construction de contexte LLM").\n- "public_interface": Liste les fonctions, classes, ou endpoints API principaux qui sont destinés à être utilisés par d'autres parties du code. Sois concis. Pour du HTML, liste les sections principales. Pour du CSS, les classes majeures.\n- "dependencies": Liste les modules ou fichiers importés qui sont essentiels à ce fichier.\n\nCode du fichier `{file_path}`:\n---\n{content}\n---
 summarizer_timeout_seconds = 300
-summarizer_max_workers = 10
+summarizer_max_workers = 2
 
 [Tokens]
 # Optional: API key for token calculation services if you use one

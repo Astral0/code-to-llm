@@ -39,11 +39,68 @@ SUMMARIZER_LLM_API_TYPE = "ollama" # Default to ollama for summarizer
 SUMMARIZER_LLM_PROMPT = "" # Sera chargé depuis config.ini
 SUMMARIZER_LLM_TIMEOUT = 120 # Default timeout for summarizer LLM calls
 SUMMARIZER_MAX_WORKERS = 10 # Default max workers for summarizer thread pool
+SUMMARIZER_LLM_MODELS_LIST = [] # Nouvelle variable globale
+
+def fetch_ollama_models(url):
+    """Récupère les modèles disponibles depuis un serveur Ollama."""
+    try:
+        # L'URL doit pointer vers la racine de l'API, ex: http://localhost:11434
+        target_url = url.rstrip('/') + "/api/tags"
+        app.logger.info(f"Tentative de récupération des modèles Ollama depuis : {target_url}")
+        response = requests.get(target_url, timeout=5) # Timeout court pour ne pas bloquer le démarrage
+        response.raise_for_status()
+        models_data = response.json()
+        
+        if "models" in models_data and isinstance(models_data["models"], list):
+            model_names = [model.get("name") for model in models_data["models"] if "name" in model]
+            app.logger.info(f"{len(model_names)} modèles Ollama trouvés.")
+            return sorted(model_names)
+        else:
+            app.logger.warning(f"Format de réponse inattendu de l'API Ollama (tags): {models_data}")
+            return []
+    except requests.exceptions.RequestException as e:
+        app.logger.error(f"Impossible de contacter le serveur Ollama à {url} pour lister les modèles. Erreur : {e}")
+        return []
+    except Exception as e:
+        app.logger.error(f"Erreur inattendue lors de la récupération des modèles Ollama : {e}")
+        return []
+
+def fetch_openai_models(url, api_key):
+    """Récupère les modèles disponibles depuis une API compatible OpenAI."""
+    if not api_key or api_key == "YOUR_LLM_API_KEY_HERE":
+        app.logger.warning("Clé API (Summarizer) non fournie ou invalide, impossible de lister les modèles OpenAI.")
+        return []
+    try:
+        # L'URL doit pointer vers la base de l'API, ex: https://api.openai.com
+        target_url = url.rstrip('/') + "/v1/models"
+        headers = {"Authorization": f"Bearer {api_key}"}
+        app.logger.info(f"Tentative de récupération des modèles OpenAI depuis : {target_url}")
+        response = requests.get(target_url, headers=headers, timeout=10)
+        response.raise_for_status()
+        models_data = response.json()
+
+        if "data" in models_data and isinstance(models_data["data"], list):
+            # Filtrer pour ne garder que les modèles potentiellement utiles pour la génération de texte
+            model_names = [
+                model.get("id") for model in models_data["data"]
+                if "id" in model and ("gpt" in model.get("id") or "instruct" in model.get("id")) and "vision" not in model.get("id")
+            ]
+            app.logger.info(f"{len(model_names)} modèles OpenAI pertinents trouvés.")
+            return sorted(model_names)
+        else:
+            app.logger.warning(f"Format de réponse inattendu de l'API OpenAI (models): {models_data}")
+            return []
+    except requests.exceptions.RequestException as e:
+        app.logger.error(f"Impossible de contacter le serveur OpenAI à {url} pour lister les modèles. Erreur : {e}")
+        return []
+    except Exception as e:
+        app.logger.error(f"Erreur inattendue lors de la récupération des modèles OpenAI : {e}")
+        return []
 
 def load_config():
     global INSTRUCTION_TEXT_1, INSTRUCTION_TEXT_2
     global LLM_SERVER_URL, LLM_SERVER_APIKEY, LLM_SERVER_MODEL, LLM_SERVER_ENABLED, LLM_SERVER_API_TYPE, LLM_SERVER_STREAM_RESPONSE
-    global SUMMARIZER_LLM_URL, SUMMARIZER_LLM_APIKEY, SUMMARIZER_LLM_MODEL, SUMMARIZER_LLM_ENABLED, SUMMARIZER_LLM_API_TYPE, SUMMARIZER_LLM_PROMPT, SUMMARIZER_LLM_TIMEOUT, SUMMARIZER_MAX_WORKERS
+    global SUMMARIZER_LLM_URL, SUMMARIZER_LLM_APIKEY, SUMMARIZER_LLM_MODEL, SUMMARIZER_LLM_ENABLED, SUMMARIZER_LLM_API_TYPE, SUMMARIZER_LLM_PROMPT, SUMMARIZER_LLM_TIMEOUT, SUMMARIZER_MAX_WORKERS, SUMMARIZER_LLM_MODELS_LIST
     config = configparser.ConfigParser()
     try:
         if os.path.exists('config.ini'):
@@ -119,7 +176,32 @@ def load_config():
  ''')
                     SUMMARIZER_LLM_TIMEOUT = config.getint('SummarizerLLM', 'summarizer_timeout_seconds', fallback=SUMMARIZER_LLM_TIMEOUT)
                     SUMMARIZER_MAX_WORKERS = config.getint('SummarizerLLM', 'summarizer_max_workers', fallback=SUMMARIZER_MAX_WORKERS)
-                    app.logger.info(f"Configuration du Summarizer LLM chargée (Modèle: {SUMMARIZER_LLM_MODEL}).")
+                    # --- NOUVELLE LOGIQUE DE RÉCUPÉRATION DES MODÈLES ---
+                    app.logger.info(f"Récupération de la liste des modèles pour le type d'API Summarizer : {SUMMARIZER_LLM_API_TYPE}")
+                    if SUMMARIZER_LLM_API_TYPE == 'ollama':
+                        # Pour Ollama, l'URL est généralement celle du service, ex: http://localhost:11434
+                        SUMMARIZER_LLM_MODELS_LIST = fetch_ollama_models(SUMMARIZER_LLM_URL)
+                    elif SUMMARIZER_LLM_API_TYPE == 'openai':
+                        # Pour OpenAI, l'URL peut être custom, mais on utilise la clé API de la section
+                        SUMMARIZER_LLM_MODELS_LIST = fetch_openai_models(SUMMARIZER_LLM_URL, SUMMARIZER_LLM_APIKEY)
+                    else:
+                        app.logger.warning(f"Type d'API '{SUMMARIZER_LLM_API_TYPE}' non supporté pour la récupération dynamique de modèles. Utilisation de la liste statique de config.ini.")
+                        # Fallback sur la liste statique du fichier de config si le type n'est pas géré
+                        SUMMARIZER_LLM_MODELS_LIST = [model.strip() for model in config.get('SummarizerLLM', 'models_list', fallback=SUMMARIZER_LLM_MODEL).split(',') if model.strip()]
+
+                    # Si la liste est vide après la tentative de fetch, utiliser le modèle par défaut comme fallback
+                    if not SUMMARIZER_LLM_MODELS_LIST and SUMMARIZER_LLM_MODEL:
+                        app.logger.warning(f"La liste des modèles est vide. Ajout du modèle par défaut '{SUMMARIZER_LLM_MODEL}' comme seule option.")
+                        SUMMARIZER_LLM_MODELS_LIST.append(SUMMARIZER_LLM_MODEL)
+                    
+                    # S'assurer que le modèle par défaut est dans la liste et en première position
+                    if SUMMARIZER_LLM_MODEL and SUMMARIZER_LLM_MODEL in SUMMARIZER_LLM_MODELS_LIST:
+                        SUMMARIZER_LLM_MODELS_LIST.remove(SUMMARIZER_LLM_MODEL)
+                        SUMMARIZER_LLM_MODELS_LIST.insert(0, SUMMARIZER_LLM_MODEL)
+                    elif SUMMARIZER_LLM_MODEL and SUMMARIZER_LLM_MODEL not in SUMMARIZER_LLM_MODELS_LIST:
+                         SUMMARIZER_LLM_MODELS_LIST.insert(0, SUMMARIZER_LLM_MODEL)
+
+                    app.logger.info(f"Configuration du Summarizer LLM chargée (Modèle par défaut: {SUMMARIZER_LLM_MODEL}). Modèles disponibles: {len(SUMMARIZER_LLM_MODELS_LIST)}")
                 else:
                     app.logger.info("Fonctionnalité LLM de Résumé désactivée dans config.ini.")
             else:
@@ -468,6 +550,8 @@ def index():
                            llm_feature_enabled=LLM_SERVER_ENABLED,
                            llm_stream_response_enabled=LLM_SERVER_STREAM_RESPONSE,
                            summarizer_llm_enabled=SUMMARIZER_LLM_ENABLED,
+                           summarizer_llm_models_list=SUMMARIZER_LLM_MODELS_LIST, # Add this
+                           summarizer_max_workers=SUMMARIZER_MAX_WORKERS,     # Add this
                            has_md_files=analysis_cache.get('has_md_files', False))
 
 @app.route('/upload', methods=['POST'])
@@ -589,6 +673,8 @@ def generate_context():
     
     instructions = data.get("instructions", "")
     compression_mode = data.get("compression_mode", "none") # Récupérer le mode de compression
+    summarizer_model_override = data.get("summarizer_model", None)
+    summarizer_workers_override = data.get("summarizer_max_workers", None)
     
     app.logger.info(f"Secret masking: {'enabled' if enable_masking else 'disabled'}, mode: {mask_mode}")
     app.logger.info(f"Instructions reçues: {instructions[:100]}{'...' if len(instructions) > 100 else ''}")
@@ -627,9 +713,24 @@ def generate_context():
     elif compression_mode == "summarize":
         app.logger.info("Applying 'Summarize with AI' compression.")
         
+        # Determine which values to use
+        effective_workers = SUMMARIZER_MAX_WORKERS
+        if summarizer_workers_override is not None:
+            try:
+                effective_workers = int(summarizer_workers_override)
+            except (ValueError, TypeError):
+                app.logger.warning(f"Invalid summarizer_max_workers value received: {summarizer_workers_override}. Falling back to default.")
+        
+        effective_model = SUMMARIZER_LLM_MODEL
+        if summarizer_model_override and summarizer_model_override in SUMMARIZER_LLM_MODELS_LIST:
+            effective_model = summarizer_model_override
+
+        app.logger.info(f"Summarizing with model: '{effective_model}' and max_workers: {effective_workers}")
+
         summaries = {}
-        with concurrent.futures.ThreadPoolExecutor(max_workers=SUMMARIZER_MAX_WORKERS) as executor:
-            future_to_file = {executor.submit(summarize_code_with_llm, f['content'], f['path']): f for f in context_files}
+        with concurrent.futures.ThreadPoolExecutor(max_workers=effective_workers) as executor:
+            # Pass the effective_model to the submit call
+            future_to_file = {executor.submit(summarize_code_with_llm, f['content'], f['path'], effective_model): f for f in context_files}
             for future in concurrent.futures.as_completed(future_to_file):
                 file_obj = future_to_file[future]
                 try:
@@ -848,9 +949,9 @@ if __name__ == '__main__':
             
     app.run(host=host, port=port, debug=True)
 
-def summarize_code_with_llm(content: str, file_path: str) -> str:
+def summarize_code_with_llm(content: str, file_path: str, model: str) -> str:
     """Appelle le LLM de résumé pour obtenir un résumé du code en utilisant l'endpoint /api/generate."""
-    if not SUMMARIZER_LLM_ENABLED or not SUMMARIZER_LLM_URL or not SUMMARIZER_LLM_MODEL:
+    if not SUMMARIZER_LLM_ENABLED or not SUMMARIZER_LLM_URL or not model: # Check model argument
         return f"### [SUMMARIZER NOT CONFIGURED FOR {file_path}]"
 
     prompt = SUMMARIZER_LLM_PROMPT.format(file_path=file_path, content=content)
@@ -858,7 +959,7 @@ def summarize_code_with_llm(content: str, file_path: str) -> str:
     headers = {"Content-Type": "application/json"}
     # Payload pour l'endpoint /api/generate d'Ollama
     payload = {
-        "model": SUMMARIZER_LLM_MODEL,
+        "model": model, # Use the model argument here
         "prompt": prompt,
         "format": "json",
         "stream": False
@@ -930,7 +1031,7 @@ def summarize_code():
 
     # Utiliser la fonction centralisée pour obtenir le résumé
     try:
-        summary = summarize_code_with_llm(code_to_summarize, "test_code_snippet")
+        summary = summarize_code_with_llm(code_to_summarize, "test_code_snippet", SUMMARIZER_LLM_MODEL)
         # La fonction retourne déjà un formatage, mais pour un test API, on peut vouloir le JSON brut
         # Pour l'instant, on retourne le résumé formaté pour être cohérent
         if "SUMMARY FAILED" in summary or "NOT CONFIGURED" in summary:

@@ -20,6 +20,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const compressionLabel = document.getElementById('compressionLabel');
     const compressionValue = document.getElementById('compressionValue');
     const compressionMenu = document.querySelector('.dropdown-menu[aria-labelledby="compressionOptionsBtn"]');
+    const summarizerOptionsDiv = document.getElementById('summarizer-options');
+    const summarizerModelSelect = document.getElementById('summarizerModelSelect');
+    const summarizerWorkersSelect = document.getElementById('summarizerWorkersSelect');
 // NOUVEAU: Gestionnaire d'événements pour les options de compression
     if (compressionMenu) {
         compressionMenu.addEventListener('click', (event) => {
@@ -39,6 +42,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 if (compressionLabel) {
                     compressionLabel.textContent = selectedText;
+                }
+                
+                // Show/hide summarizer options based on selection
+                if (selectedValue === 'summarize') {
+                    summarizerOptionsDiv?.classList.remove('d-none');
+                } else {
+                    summarizerOptionsDiv?.classList.add('d-none');
                 }
             }
         });
@@ -613,6 +623,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const instructions = instructionsTextarea.value;
         const selectedCompression = compressionValue.value; // Déclaration de la variable manquante
 
+        // ADD THIS
+        const summarizerModel = summarizerModelSelect ? summarizerModelSelect.value : null;
+        const summarizerMaxWorkers = summarizerWorkersSelect ? summarizerWorkersSelect.value : null;
+
         try {
             const response = await fetch('/generate', {
                 method: 'POST',
@@ -621,7 +635,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     selected_files: selectedFiles,
                     masking_options: maskingOptions,
                     instructions: instructions,
-                    compression_mode: selectedCompression
+                    compression_mode: selectedCompression,
+                    summarizer_model: summarizerModel,         // Add this line
+                    summarizer_max_workers: summarizerMaxWorkers // Add this line
                 })
             });
             const result = await response.json();
