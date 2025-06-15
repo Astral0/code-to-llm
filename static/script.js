@@ -87,8 +87,8 @@ document.addEventListener('DOMContentLoaded', () => {
     let currentAssistantMessageDiv = null; // Pour le streaming
 
     // --- Utility functions ---
-    function showElement(element) { element?.classList.remove('visually-hidden'); }
-    function hideElement(element) { element?.classList.add('visually-hidden'); }
+    function showElement(element) { element?.classList.remove('d-none'); }
+    function hideElement(element) { element?.classList.add('d-none'); }
     function showError(errorElement, message, statusContainer, isHtml = false) {
         if (errorElement) { 
             if (isHtml) {
@@ -601,75 +601,151 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- Generate context ---
     async function executeActualGeneration() {
         const selectedCheckboxes = fileListDiv.querySelectorAll('.form-check-input:checked');
-        const selectedFiles = Array.from(selectedCheckboxes).map(cb => cb.value);
+        const selectedFiles = Array.from(selectedCheckboxes).map(cb => cb.value).filter(path => {
+            const li = fileListDiv.querySelector(`input[value="${path}"]`)?.closest('li');
+            return li && li.classList.contains('file');
+        });
 
         if (selectedFiles.length === 0) {
             showError(generateError, "No files selected for context generation.", generationSection);
             return;
         }
         hideError(generateError);
-        showSpinner(generateSpinner);
         hideElement(resultAndChatArea);
 
-        // Préserver la sélection pour une éventuelle régénération
         selectionToPreserveForRegeneration = new Set(selectedFiles);
 
-        // Récupérer les options de masquage
         const enableMasking = enableSecretMaskingCheckbox.checked;
-        // Pour l'instant, on ne propose pas de changer le mask_mode via UI, donc on utilise le défaut du serveur.
-        const maskingOptions = { enable_masking: enableMasking, mask_mode: "mask" }; 
-
-        // Récupérer les instructions
+        const maskingOptions = { enable_masking: enableMasking, mask_mode: "mask" };
         const instructions = instructionsTextarea.value;
-        const selectedCompression = compressionValue.value; // Déclaration de la variable manquante
-
-        // ADD THIS
+        const selectedCompression = compressionValue.value;
         const summarizerModel = summarizerModelSelect ? summarizerModelSelect.value : null;
         const summarizerMaxWorkers = summarizerWorkersSelect ? summarizerWorkersSelect.value : null;
 
-        try {
-            const response = await fetch('/generate', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    selected_files: selectedFiles,
-                    masking_options: maskingOptions,
-                    instructions: instructions,
-                    compression_mode: selectedCompression,
-                    summarizer_model: summarizerModel,         // Add this line
-                    summarizer_max_workers: summarizerMaxWorkers // Add this line
-                })
-            });
-            const result = await response.json();
-            if (!response.ok || !result.success) {
-                throw new Error(result.error || `Error ${response.status}`);
-            }
-            markdownOutput.value = result.markdown;
-            displaySummary(result.summary);
-            displaySecretsAlert(result.summary.secrets_masked, result.summary.files_with_secrets); 
-            
-            showElement(resultAndChatArea);
-            showElement(regenerateBtn);
-            hideElement(generateBtn);
+        if (selectedCompression === 'summarize') {
+            const progressContainer = document.getElementById('summarizer-progress-container');
+            const progressBar = document.getElementById('summarizer-progress-bar');
+            const progressText = document.getElementById('summarizer-progress-text');
 
-            // Logique pour afficher/cacher les éléments de chat après génération
-            // Ces éléments sont définis dans index.html, mais nous les contrôlons ici aussi
-            const llmInteractionContainer = document.getElementById('llmInteractionContainer');
-            const startLlmChatBtn = document.getElementById('startLlmChatBtn');
-            const chatUiContainer = document.getElementById('chatUiContainer');
-
-            if (llmInteractionContainer) showElement(llmInteractionContainer);
-            if (startLlmChatBtn) showElement(startLlmChatBtn);
-            if (chatUiContainer) hideElement(chatUiContainer); // Cacher l'UI de chat si on (re)génère
-            
-            // Scroll to the result area
-            resultAndChatArea.scrollIntoView({ behavior: 'smooth' });
-
-        } catch (error) {
-            console.error("Generation error:", error);
-            showError(generateError, `Generation error: ${error.message}`, generationSection);
-        } finally {
+            showElement(progressContainer);
+            progressBar.style.width = '0%';
+            progressBar.setAttribute('aria-valuenow', 0);
+            progressText.textContent = 'Starting...';
             hideSpinner(generateSpinner);
+
+            try {
+                const initialResponse = await fetch('/generate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        selected_files: selectedFiles,
+                        masking_options: maskingOptions,
+                        instructions: instructions,
+                        compression_mode: selectedCompression,
+                        summarizer_model: summarizerModel,
+                        summarizer_max_workers: summarizerMaxWorkers
+                    })
+                });
+
+                const initialResult = await initialResponse.json();
+                if (!initialResponse.ok || !initialResult.success || !initialResult.task_id) {
+                    throw new Error(initialResult.error || `Failed to start summarization task.`);
+                }
+
+                const taskId = initialResult.task_id;
+                const eventSource = new EventSource(`/summarize_progress?task_id=${taskId}`);
+
+                eventSource.onmessage = (event) => {
+                    const data = JSON.parse(event.data);
+                    if (data.status === 'running') {
+                        const percent = data.total > 0 ? (data.completed / data.total) * 100 : 0;
+                        progressBar.style.width = `${percent}%`;
+                        progressBar.setAttribute('aria-valuenow', percent);
+                        progressText.textContent = `${data.completed} / ${data.total}`;
+                    } else if (data.status === 'error') {
+                        showError(generateError, `Summarization error: ${data.message}`, generationSection);
+                        eventSource.close();
+                        hideElement(progressContainer);
+                        showElement(generateBtn);
+                    }
+                };
+
+                eventSource.addEventListener('done', (event) => {
+                    eventSource.close();
+                    hideElement(progressContainer);
+
+                    const finalResult = JSON.parse(event.data);
+                    if (finalResult.status === 'complete' && finalResult.result && finalResult.result.summary) {
+                        const { markdown, summary } = finalResult.result;
+                        markdownOutput.value = markdown;
+                        displaySummary(summary);
+                        displaySecretsAlert(summary.secrets_masked, summary.files_with_secrets);
+                        showElement(resultAndChatArea);
+                        const llmInteractionContainer = document.getElementById('llmInteractionContainer');
+                        if (llmInteractionContainer) showElement(llmInteractionContainer);
+                        resultAndChatArea.scrollIntoView({ behavior: 'smooth' });
+                    } else {
+                        const errorMessage = finalResult.result ? finalResult.result.error : 'Invalid data structure received on completion.';
+                        throw new Error(errorMessage || 'Summarization completed but returned an invalid result.');
+                    }
+                });
+
+                eventSource.onerror = (err) => {
+                    eventSource.close();
+                    console.error("EventSource failed:", err);
+                    showError(generateError, "Connection to progress stream failed. Please try again.", generationSection);
+                    hideElement(progressContainer);
+                    showElement(generateBtn);
+                };
+
+            } catch (error) {
+                console.error("Summarization error:", error);
+                showError(generateError, `Summarization error: ${error.message}`, generationSection);
+                hideElement(document.getElementById('summarizer-progress-container'));
+                showElement(generateBtn);
+            }
+
+        } else {
+            showSpinner(generateSpinner);
+            try {
+                const response = await fetch('/generate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        selected_files: selectedFiles,
+                        masking_options: maskingOptions,
+                        instructions: instructions,
+                        compression_mode: selectedCompression,
+                        summarizer_model: summarizerModel,
+                        summarizer_max_workers: summarizerMaxWorkers
+                    })
+                });
+                const result = await response.json();
+                if (!response.ok || !result.success) {
+                    throw new Error(result.error || `Error ${response.status}`);
+                }
+                markdownOutput.value = result.markdown;
+                displaySummary(result.summary);
+                displaySecretsAlert(result.summary.secrets_masked, result.summary.files_with_secrets);
+
+                showElement(resultAndChatArea);
+
+                const llmInteractionContainer = document.getElementById('llmInteractionContainer');
+                const startLlmChatBtn = document.getElementById('startLlmChatBtn');
+                const chatUiContainer = document.getElementById('chatUiContainer');
+
+                if (llmInteractionContainer) showElement(llmInteractionContainer);
+                if (startLlmChatBtn) showElement(startLlmChatBtn);
+                if (chatUiContainer) hideElement(chatUiContainer);
+
+                resultAndChatArea.scrollIntoView({ behavior: 'smooth' });
+
+            } catch (error) {
+                console.error("Generation error:", error);
+                showError(generateError, `Generation error: ${error.message}`, generationSection);
+            } finally {
+                hideSpinner(generateSpinner);
+            }
         }
     }
 

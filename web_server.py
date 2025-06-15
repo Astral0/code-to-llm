@@ -10,8 +10,10 @@ import re
 import configparser
 import requests
 import json
-import concurrent.futures # Ajout de l'import pour la parallélisation
-import threading # Ajout de l'import pour le verrou
+import concurrent.futures
+import threading
+import uuid
+import time
 
 app = Flask(__name__, template_folder='templates', static_folder='static')
 
@@ -40,6 +42,11 @@ SUMMARIZER_LLM_PROMPT = "" # Sera chargé depuis config.ini
 SUMMARIZER_LLM_TIMEOUT = 120 # Default timeout for summarizer LLM calls
 SUMMARIZER_MAX_WORKERS = 10 # Default max workers for summarizer thread pool
 SUMMARIZER_LLM_MODELS_LIST = [] # Nouvelle variable globale
+
+# --- État partagé pour les tâches de résumé ---
+progress_tasks = {}
+progress_lock = threading.Lock()
+
 
 def fetch_ollama_models(url):
     """Récupère les modèles disponibles depuis un serveur Ollama."""
@@ -659,6 +666,64 @@ def upload_directory():
         }
     })
 
+def run_summarization_task(task_id, context_files, effective_model, effective_workers, masking_options, instructions):
+    """
+    Exécute la tâche de résumé dans un thread séparé et met à jour la progression.
+    """
+    try:
+        summaries = {}
+        with concurrent.futures.ThreadPoolExecutor(max_workers=effective_workers) as executor:
+            future_to_file = {executor.submit(summarize_code_with_llm, f['content'], f['path'], effective_model): f for f in context_files}
+            
+            for future in concurrent.futures.as_completed(future_to_file):
+                file_obj = future_to_file[future]
+                try:
+                    summaries[file_obj['path']] = future.result()
+                except Exception as exc:
+                    app.logger.error(f"Future for {file_obj['path']} generated an exception: {exc}")
+                    summaries[file_obj['path']] = f"### [ERROR generating summary for {file_obj['path']}]"
+                
+                # Mettre à jour la progression
+                with progress_lock:
+                    if task_id in progress_tasks:
+                        progress_tasks[task_id]['completed'] += 1
+
+        # Une fois la boucle terminée, assembler le résultat final
+        all_summaries_content = "\n\n---\n\n".join(summaries[f['path']] for f in context_files)
+        summary_file = {
+            "path": "AI_GENERATED_PROJECT_SUMMARY.md",
+            "name": "AI_GENERATED_PROJECT_SUMMARY.md",
+            "content": all_summaries_content
+        }
+        final_context_files = [summary_file]
+
+        markdown_context, summary = build_uploaded_context_string(
+            uploaded_files=final_context_files,
+            root_name="Uploaded_Directory",
+            enable_masking=masking_options.get("enable_masking", True),
+            mask_mode=masking_options.get("mask_mode", "mask"),
+            instructions=instructions
+        )
+        
+        final_result = {
+            "markdown": markdown_context,
+            "summary": summary
+        }
+
+        # Mettre à jour la tâche avec le statut "complete" et le résultat
+        with progress_lock:
+            if task_id in progress_tasks:
+                progress_tasks[task_id]['status'] = 'complete'
+                progress_tasks[task_id]['result'] = final_result
+
+    except Exception as e:
+        app.logger.error(f"Error in summarization thread for task {task_id}: {e}")
+        with progress_lock:
+            if task_id in progress_tasks:
+                progress_tasks[task_id]['status'] = 'error'
+                progress_tasks[task_id]['result'] = {"error": str(e)}
+
+
 @app.route('/generate', methods=['POST'])
 def generate_context():
     if not request.is_json:
@@ -672,7 +737,7 @@ def generate_context():
     mask_mode = masking_options.get("mask_mode", "mask")
     
     instructions = data.get("instructions", "")
-    compression_mode = data.get("compression_mode", "none") # Récupérer le mode de compression
+    compression_mode = data.get("compression_mode", "none")
     summarizer_model_override = data.get("summarizer_model", None)
     summarizer_workers_override = data.get("summarizer_max_workers", None)
     
@@ -681,39 +746,23 @@ def generate_context():
     app.logger.info(f"Compression mode selected: {compression_mode}")
     
     selected_paths = data["selected_files"]
-    # analysis_cache["uploaded_files"] now contains only non-ignored files
     all_selectable_files = analysis_cache.get("uploaded_files", [])
     
-    if not all_selectable_files and selected_paths : # Check if selectable files list is empty but user selected some (should not happen)
-         app.logger.warning("User selected files, but the list of selectable files is empty. Re-analyze might be needed.")
-         # Potentially could re-trigger analysis or send specific error.
-         # For now, assume this implies an issue if selected_paths is not empty.
-
-    # Filter uploaded files based on the selected paths by user
     context_files = [f for f in all_selectable_files if f["path"] in selected_paths]
-    if not context_files: # No files selected or selection is empty
-        # check if selected_paths was non-empty, means selection led to 0 files from selectable ones
+    if not context_files:
         if selected_paths:
              app.logger.warning(f"User selected paths {selected_paths}, but these did not match any available selectable files.")
         return jsonify({"success": False, "error": "No files selected or selection did not match available files."}), 400
         
-    # Appliquer la compression si le mode est "compact"
     if compression_mode == "compact":
         app.logger.info("Applying 'Compact Mode' compression.")
         for file_obj in context_files:
-            if file_obj['content']: # Ne pas traiter un contenu vide
+            if file_obj['content']:
                 file_obj['content'] = compact_code(file_obj['content'])
-
-    # Appliquer la compression si le mode est "compact"
-    if compression_mode == "compact":
-        app.logger.info("Applying 'Compact Mode' compression.")
-        for file_obj in context_files:
-            if file_obj['content']: # Ne pas traiter un contenu vide
-                file_obj['content'] = compact_code(file_obj['content'])
+    
     elif compression_mode == "summarize":
         app.logger.info("Applying 'Summarize with AI' compression.")
         
-        # Determine which values to use
         effective_workers = SUMMARIZER_MAX_WORKERS
         if summarizer_workers_override is not None:
             try:
@@ -727,30 +776,26 @@ def generate_context():
 
         app.logger.info(f"Summarizing with model: '{effective_model}' and max_workers: {effective_workers}")
 
-        summaries = {}
-        with concurrent.futures.ThreadPoolExecutor(max_workers=effective_workers) as executor:
-            # Pass the effective_model to the submit call
-            future_to_file = {executor.submit(summarize_code_with_llm, f['content'], f['path'], effective_model): f for f in context_files}
-            for future in concurrent.futures.as_completed(future_to_file):
-                file_obj = future_to_file[future]
-                try:
-                    summaries[file_obj['path']] = future.result()
-                except Exception as exc:
-                    app.logger.error(f"Future for {file_obj['path']} generated an exception: {exc}")
-                    summaries[file_obj['path']] = f"### [ERROR generating summary for {file_obj['path']}]"
-    
-        # Ordonner les résumés comme les fichiers d'origine
-        all_summaries_content = "\n\n---\n\n".join(summaries[f['path']] for f in context_files)
-        summary_file = {
-            "path": "AI_GENERATED_PROJECT_SUMMARY.md",
-            "name": "AI_GENERATED_PROJECT_SUMMARY.md",
-            "content": all_summaries_content
-        }
-        # Remplacer la liste des fichiers par le seul fichier de résumé
-        context_files = [summary_file]
+        task_id = str(uuid.uuid4())
+        with progress_lock:
+            progress_tasks[task_id] = {
+                'completed': 0,
+                'total': len(context_files),
+                'status': 'running',
+                'result': None
+            }
+        
+        # Démarrer la tâche de résumé en arrière-plan
+        thread = threading.Thread(target=run_summarization_task, args=(
+            task_id, context_files, effective_model, effective_workers, masking_options, instructions
+        ))
+        thread.start()
+        
+        return jsonify({"success": True, "task_id": task_id})
 
+    # Pour les modes "none" et "compact", le comportement reste le même
     markdown_context, summary = build_uploaded_context_string(
-        uploaded_files=context_files, # Use the user-selected files
+        uploaded_files=context_files,
         root_name="Uploaded_Directory",
         enable_masking=enable_masking,
         mask_mode=mask_mode,
@@ -760,8 +805,53 @@ def generate_context():
     return jsonify({
         "success": True, 
         "markdown": markdown_context,
-        "summary": summary # Summary is now more detailed
+        "summary": summary
     })
+
+@app.route('/summarize_progress')
+def summarize_progress():
+    task_id = request.args.get('task_id')
+    if not task_id:
+        return Response("data: {\"error\": \"task_id is required\"}\n\n", mimetype='text/event-stream')
+
+    def generate():
+        while True:
+            with progress_lock:
+                task = progress_tasks.get(task_id)
+                if not task:
+                    yield f"data: {json.dumps({'status': 'error', 'message': 'Task not found'})}\n\n"
+                    break
+                
+                status = task['status']
+                if status == 'running':
+                    progress_data = {
+                        'status': 'running',
+                        'completed': task['completed'],
+                        'total': task['total']
+                    }
+                    yield f"data: {json.dumps(progress_data)}\n\n"
+                elif status == 'complete':
+                    result_data = {
+                        'status': 'complete',
+                        'result': task['result']
+                    }
+                    yield f"event: done\ndata: {json.dumps(result_data)}\n\n"
+                    # Nettoyer la tâche après l'envoi du résultat
+                    del progress_tasks[task_id]
+                    break
+                elif status == 'error':
+                    error_data = {
+                        'status': 'error',
+                        'message': task.get('result', {}).get('error', 'An unknown error occurred.')
+                    }
+                    yield f"data: {json.dumps(error_data)}\n\n"
+                    del progress_tasks[task_id]
+                    break
+            
+            time.sleep(0.5)
+
+    return Response(generate(), mimetype='text/event-stream')
+
 
 @app.route('/debug_gitignore', methods=['GET'])
 def debug_gitignore():
@@ -947,7 +1037,7 @@ if __name__ == '__main__':
             print("Erreur: --host nécessite un argument d'adresse IP.", file=sys.stderr)
             sys.exit(1)
             
-    app.run(host=host, port=port, debug=True)
+    app.run(host=host, port=port, debug=False, threaded=True)
 
 def summarize_code_with_llm(content: str, file_path: str, model: str) -> str:
     """Appelle le LLM de résumé pour obtenir un résumé du code en utilisant l'endpoint /api/generate."""
@@ -992,6 +1082,17 @@ def summarize_code_with_llm(content: str, file_path: str, model: str) -> str:
         if 'error' in summary_content:
             app.logger.error(f"LLM returned an error for {file_path}: {summary_content['error']}")
             return f"### [SUMMARY FAILED for {file_path}]\n\n*LLM Error: {summary_content['error']}*"
+
+        # --- NOUVELLE LOGIQUE DE VALIDATION ---
+        required_keys = ["file_purpose", "core_logic", "key_interactions", "tech_stack"]
+        if not all(key in summary_content for key in required_keys):
+            app.logger.warning(f"LLM response for {file_path} is missing required keys. Raw content: {summary_content}")
+            return (
+                f"### Résumé partiel de `{file_path}` (Format de réponse inattendu)\n\n"
+                f"**Objectif:** {summary_content.get('file_purpose', 'Non spécifié')}\n\n"
+                f"**Logique principale:**\n- {summary_content.get('core_logic', 'Non spécifié')}\n\n"
+                f"**Données brutes reçues:**\n```json\n{json.dumps(summary_content, indent=2)}\n```"
+            )
 
         formatted_summary = (
             f"### Résumé de `{file_path}`\n\n"
