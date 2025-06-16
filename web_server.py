@@ -17,6 +17,12 @@ import threading
 import uuid
 import time
 
+TEXTCHARS = bytearray({7, 8, 9, 10, 12, 13, 27} | set(range(0x20, 0x100)) - {0x7f})
+
+def is_binary_string(bytes_to_check: bytes) -> bool:
+    """Checks if a byte string appears to contain non-text characters."""
+    return bool(bytes_to_check.translate(None, TEXTCHARS))
+
 app = Flask(__name__, template_folder='templates', static_folder='static')
 
 socketio = SocketIO(app, cors_allowed_origins="*") # Ajout de cors_allowed_origins
@@ -52,6 +58,9 @@ SUMMARIZER_LLM_MODELS_LIST = [] # Nouvelle variable globale
 
 # --- Configuration du LLM pour le pilotage de navigateur ---
 LLM_CONFIG = {} # Initialisation de la variable globale
+
+# --- Configuration de la détection binaire ---
+BINARY_DETECTION_CONFIG = {}
 
 # --- État partagé pour les tâches de résumé ---
 progress_tasks = {}
@@ -118,7 +127,7 @@ def load_config():
     global INSTRUCTION_TEXT_1, INSTRUCTION_TEXT_2
     global LLM_SERVER_URL, LLM_SERVER_APIKEY, LLM_SERVER_MODEL, LLM_SERVER_ENABLED, LLM_SERVER_API_TYPE, LLM_SERVER_STREAM_RESPONSE
     global SUMMARIZER_LLM_URL, SUMMARIZER_LLM_APIKEY, SUMMARIZER_LLM_MODEL, SUMMARIZER_LLM_ENABLED, SUMMARIZER_LLM_API_TYPE, SUMMARIZER_LLM_PROMPT, SUMMARIZER_LLM_TIMEOUT, SUMMARIZER_MAX_WORKERS, SUMMARIZER_LLM_MODELS_LIST
-    global LLM_CONFIG # Ajouter cette ligne
+    global LLM_CONFIG, BINARY_DETECTION_CONFIG # Ajouter cette ligne
     config = configparser.ConfigParser()
     try:
         if os.path.exists('config.ini'):
@@ -133,6 +142,21 @@ def load_config():
             if 'gemini' in config:
                 LLM_CONFIG['gemini'] = dict(config['gemini'])
             app.logger.info("Configuration pour le pilotage de navigateur (ChatGPT, Gemini) chargée.")
+
+            # Charger la configuration de détection binaire
+            if 'BinaryDetection' in config:
+                blacklist_str = config.get('BinaryDetection', 'extension_blacklist', fallback='')
+                whitelist_str = config.get('BinaryDetection', 'extension_whitelist', fallback='')
+                
+                # Convertir les chaînes en sets pour une performance O(1)
+                BINARY_DETECTION_CONFIG['blacklist'] = {ext.strip() for ext in blacklist_str.split(',') if ext.strip()}
+                BINARY_DETECTION_CONFIG['whitelist'] = {ext.strip() for ext in whitelist_str.split(',') if ext.strip()}
+                
+                app.logger.info(f"Binary detection lists loaded: {len(BINARY_DETECTION_CONFIG['blacklist'])} blacklisted, {len(BINARY_DETECTION_CONFIG['whitelist'])} whitelisted.")
+            else:
+                app.logger.warning("Section [BinaryDetection] not found in config.ini. Binary file filtering might be incomplete.")
+                BINARY_DETECTION_CONFIG['blacklist'] = set()
+                BINARY_DETECTION_CONFIG['whitelist'] = set()
 
             if 'LLMServer' in config:
                 LLM_SERVER_URL = config.get('LLMServer', 'url', fallback=None)
@@ -607,6 +631,47 @@ def upload_directory():
 
     if not uploaded_files:
         return jsonify({"success": False, "error": "No valid file received."}), 400
+
+    # --- NOUVELLE LOGIQUE DE FILTRAGE HYBRIDE ---
+    app.logger.info("Applying 3-tier binary file detection...")
+    filtered_by_binary_detection = []
+    binary_files_detected = []
+    
+    # Temporairement stocker le contenu binaire pour l'analyse
+    temp_file_contents = {f['path']: f['content'] for f in uploaded_files}
+    
+    for file_obj in uploaded_files:
+        file_path_str = file_obj['path']
+        ext = os.path.splitext(file_path_str)[1].lower()
+
+        # Niveau 1: Liste Noire (Rejet Immédiat)
+        if ext in BINARY_DETECTION_CONFIG.get('blacklist', set()):
+            binary_files_detected.append(file_path_str)
+            continue
+
+        # Niveau 2: Liste Blanche (Acceptation Immédiate)
+        if ext in BINARY_DETECTION_CONFIG.get('whitelist', set()):
+            filtered_by_binary_detection.append(file_obj)
+            continue
+            
+        # Niveau 3: Analyse de contenu pour les cas restants
+        try:
+            # Pour la détection, nous n'avons besoin que des premiers octets.
+            # Le contenu est déjà en mémoire, donc nous l'utilisons directement.
+            # Note: le contenu est une chaîne, nous devons l'encoder pour la vérification.
+            file_content_str = file_obj['content']
+            # On ne vérifie que le début pour la performance, même si tout est en mémoire.
+            if is_binary_string(file_content_str[:1024].encode('latin-1', errors='ignore')):
+                binary_files_detected.append(file_path_str)
+            else:
+                filtered_by_binary_detection.append(file_obj)
+        except Exception as e:
+            app.logger.warning(f"Could not perform binary check on {file_path_str}, excluding it. Error: {e}")
+            binary_files_detected.append(file_path_str)
+
+    app.logger.info(f"Binary detection complete. Excluded {len(binary_files_detected)} files: {binary_files_detected}")
+    uploaded_files = filtered_by_binary_detection # Remplacer la liste par la version filtrée
+    # --- FIN DE LA LOGIQUE DE FILTRAGE ---
 
     # --- NOUVELLE LOGIQUE AMÉLIORÉE ---
 

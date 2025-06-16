@@ -25,7 +25,6 @@ except ImportError:
     HAS_DETECT_SECRETS = False
 
 # --- Configuration ---
-TEXTCHARS = bytearray({7, 8, 9, 10, 12, 13, 27} | set(range(0x20, 0x100)) - {0x7f})
 MAX_BINARY_HEAD_SIZE = 1024
 
 # --- Logging Setup ---
@@ -158,10 +157,6 @@ def detect_and_redact_with_regex(content, file_path):
     return redacted_content, count
 
 # --- Core Utility Functions ---
-
-def is_binary_string(bytes_to_check: bytes) -> bool:
-    """Checks if a byte string appears to contain non-text characters."""
-    return bool(bytes_to_check.translate(None, TEXTCHARS))
 
 def load_gitignore(repo_path: Path) -> pathspec.PathSpec:
     """
