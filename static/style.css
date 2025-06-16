@@ -184,24 +184,7 @@ body {
     flex-shrink: 0; 
 }
 
-/* Properly hide spinners and errors by default */
-.visually-hidden {
-    position: absolute !important;
-    width: 1px !important;
-    height: 1px !important;
-    padding: 0 !important;
-    margin: -1px !important;
-    overflow: hidden !important;
-    clip: rect(0, 0, 0, 0) !important;
-    white-space: nowrap !important;
-    border: 0 !important;
-}
-/* Display when needed (controlled by JS) */
-.spinner-border:not(.visually-hidden),
-.alert:not(.visually-hidden) {
-    position: static !important; width: auto !important; height: auto !important; padding: revert !important; margin: revert !important; overflow: visible !important; clip: auto !important; white-space: normal !important; border: revert !important; display: inline-block; /* For spinner */
-}
-.alert:not(.visually-hidden) { display: block; /* For alert */ }
+/* The problematic .visually-hidden override has been removed to rely on Bootstrap's default behavior. */
 
 /* Adjustments for spinner/error alignment */
 #analyze-status, #generate-status { /* Using IDs if needed */

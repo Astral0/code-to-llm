@@ -22,5 +22,15 @@ summarizer_prompt = Tu es un expert en analyse de code source. Analyse le fichie
 summarizer_timeout_seconds = 300
 summarizer_max_workers = 2
 
+[chatgpt]
+login_url = https://chat.openai.com
+prompt_textarea_selector = #prompt-textarea
+submit_button_selector = [data-testid="send-button"]
+
+[gemini]
+login_url = https://gemini.google.com
+prompt_textarea_selector = div.ql-editor[data-placeholder^="Demandez"]
+submit_button_selector = button.send-button
+
 [Tokens]
 # Optional: API key for token calculation services if you use one

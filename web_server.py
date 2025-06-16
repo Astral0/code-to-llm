@@ -1,5 +1,7 @@
 # web_server.py
 from flask import Flask, request, jsonify, render_template, Response
+from services.browser_manager import BrowserManager
+from flask_socketio import SocketIO
 import sys
 import os
 import logging
@@ -16,6 +18,11 @@ import uuid
 import time
 
 app = Flask(__name__, template_folder='templates', static_folder='static')
+
+socketio = SocketIO(app, cors_allowed_origins="*") # Ajout de cors_allowed_origins
+browser_manager = BrowserManager()
+# Configure le logger et socketio dans le browser_manager
+browser_manager.set_integrations(socketio, app.logger)
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -42,6 +49,9 @@ SUMMARIZER_LLM_PROMPT = "" # Sera chargé depuis config.ini
 SUMMARIZER_LLM_TIMEOUT = 120 # Default timeout for summarizer LLM calls
 SUMMARIZER_MAX_WORKERS = 10 # Default max workers for summarizer thread pool
 SUMMARIZER_LLM_MODELS_LIST = [] # Nouvelle variable globale
+
+# --- Configuration du LLM pour le pilotage de navigateur ---
+LLM_CONFIG = {} # Initialisation de la variable globale
 
 # --- État partagé pour les tâches de résumé ---
 progress_tasks = {}
@@ -108,6 +118,7 @@ def load_config():
     global INSTRUCTION_TEXT_1, INSTRUCTION_TEXT_2
     global LLM_SERVER_URL, LLM_SERVER_APIKEY, LLM_SERVER_MODEL, LLM_SERVER_ENABLED, LLM_SERVER_API_TYPE, LLM_SERVER_STREAM_RESPONSE
     global SUMMARIZER_LLM_URL, SUMMARIZER_LLM_APIKEY, SUMMARIZER_LLM_MODEL, SUMMARIZER_LLM_ENABLED, SUMMARIZER_LLM_API_TYPE, SUMMARIZER_LLM_PROMPT, SUMMARIZER_LLM_TIMEOUT, SUMMARIZER_MAX_WORKERS, SUMMARIZER_LLM_MODELS_LIST
+    global LLM_CONFIG # Ajouter cette ligne
     config = configparser.ConfigParser()
     try:
         if os.path.exists('config.ini'):
@@ -115,6 +126,13 @@ def load_config():
             INSTRUCTION_TEXT_1 = config.get('Instructions', 'instruction1_text', fallback=INSTRUCTION_TEXT_1)
             INSTRUCTION_TEXT_2 = config.get('Instructions', 'instruction2_text', fallback=INSTRUCTION_TEXT_2)
             app.logger.info("Configuration des instructions chargée depuis config.ini")
+
+            # AJOUTER CE BLOC pour la config du navigateur
+            if 'chatgpt' in config:
+                LLM_CONFIG['chatgpt'] = dict(config['chatgpt'])
+            if 'gemini' in config:
+                LLM_CONFIG['gemini'] = dict(config['gemini'])
+            app.logger.info("Configuration pour le pilotage de navigateur (ChatGPT, Gemini) chargée.")
 
             if 'LLMServer' in config:
                 LLM_SERVER_URL = config.get('LLMServer', 'url', fallback=None)
@@ -547,6 +565,10 @@ def build_uploaded_context_string(uploaded_files, root_name="Uploaded_Directory"
 
 
 # --- Application routes ---
+# Gestion du favicon pour éviter les 404
+@app.route('/favicon.ico')
+def favicon():
+    return '', 204
 
 @app.route('/')
 def index():
@@ -916,6 +938,8 @@ def send_to_llm():
         else:
             target_url = normalized_url
         app.logger.info(f"Appel à l'API OpenAI sur l'URL: {target_url}")
+
+    app.logger.info(f"En-têtes envoyés à l'API: {headers}")
     
     try:
         # Pass stream=True to requests.post to enable response streaming from requests library perspective
@@ -1021,8 +1045,53 @@ def send_to_llm():
         app.logger.error(f"Unexpected error in send_to_llm: {e}", exc_info=True)
         return jsonify({"error": f"Unexpected server error: {str(e)}"}), 500
 
+@socketio.on('connect')
+def handle_connect():
+    app.logger.info('Client Socket.IO connecté')
+
+@socketio.on('disconnect')
+def handle_disconnect():
+    app.logger.info('Client Socket.IO déconnecté')
+
+@app.route('/browser/launch', methods=['POST'])
+def launch_browser():
+    data = request.get_json()
+    llm_type = data.get('llm_type', 'chatgpt')
+    if not llm_type in LLM_CONFIG:
+        return jsonify({"error": f"LLM Type '{llm_type}' non configuré."}), 400
+    
+    success = browser_manager.launch_browser(llm_type, LLM_CONFIG)
+    if success:
+        return jsonify({"message": f"Navigateur pour {llm_type} lancé."})
+    return jsonify({"error": "Échec du lancement du navigateur."}), 500
+
+@app.route('/browser/attach', methods=['POST'])
+def attach_browser():
+    success = browser_manager.attach_browser()
+    if success:
+        return jsonify({"message": "Connecté au navigateur."})
+    return jsonify({"error": "Échec de la connexion au navigateur."}), 500
+
+@app.route('/browser/send_context', methods=['POST'])
+def send_context_to_browser():
+    data = request.get_json()
+    context = data.get('context')
+    llm_type = data.get('llm_type') # Récupérer le llm_type
+    
+    if not context:
+        return jsonify({"error": "Le contexte est manquant."}), 400
+    
+    if not llm_type:
+        return jsonify({"error": "Le type de LLM est manquant."}), 400
+
+    success = browser_manager.send_context_to_browser(context, LLM_CONFIG, llm_type) # Passer llm_type
+    if success:
+        return jsonify({"message": "Contexte envoyé au navigateur."})
+    
+    return jsonify({"error": "Échec de l'envoi du contexte au navigateur."}), 500
+
 if __name__ == '__main__':
-    port = 5000
+    port = 8080
     host = '127.0.0.1'
     if '--port' in sys.argv:
         try:
@@ -1037,7 +1106,7 @@ if __name__ == '__main__':
             print("Erreur: --host nécessite un argument d'adresse IP.", file=sys.stderr)
             sys.exit(1)
             
-    app.run(host=host, port=port, debug=False, threaded=True)
+    socketio.run(app, host=host, port=port, debug=False)
 
 def summarize_code_with_llm(content: str, file_path: str, model: str) -> str:
     """Appelle le LLM de résumé pour obtenir un résumé du code en utilisant l'endpoint /api/generate."""

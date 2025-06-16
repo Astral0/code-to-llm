@@ -1,5 +1,7 @@
 // static/script.js
 
+const socket = io(); // Initialise la connexion Socket.IO
+
 document.addEventListener('DOMContentLoaded', () => {
     // Lire l'état du streaming depuis l'attribut data du body
     const isLlmStreamEnabled = document.body.dataset.llmStreamEnabled === 'true';
@@ -71,6 +73,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const markdownOutput = document.getElementById('markdownOutput');
     const summaryContainer = document.getElementById('summaryContainer');
     const copyBtn = document.getElementById('copyBtn');
+    // Chat UI elements for LLM
+    const startLlmChatBtn = document.getElementById('startLlmChatBtn');
+    const chatUiContainer = document.getElementById('chatUiContainer');
+    const sendChatMessageBtn = document.getElementById('sendChatMessageBtn');
+    const chatMessageInput = document.getElementById('chatMessageInput');
 
     const llmErrorChat = document.getElementById('llm-error-chat');
     const llmChatSpinner = document.getElementById('llm-chat-spinner');
@@ -81,7 +88,6 @@ document.addEventListener('DOMContentLoaded', () => {
     let includedFilePaths = []; // Will store only the included file paths (not ignored by gitignore)
     let selectionToPreserveForRegeneration = new Set();
     let isRegeneratingFlowActive = false;
-    let compressionModeToPreserve = 'none'; // Nouvelle variable pour préserver le mode de compression
 
     let chatHistory = []; // Stocke l'historique : [{role: 'user'/'assistant', content: '...'}, ...]
     let currentAssistantMessageDiv = null; // Pour le streaming
@@ -178,14 +184,19 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // --- Directory analysis (upload of selected files) ---
-    analyzeBtn.addEventListener('click', async () => {
+    analyzeBtn.addEventListener('click', () => {
+        console.log("Analyze button clicked.");
         const files = directoryPicker.files;
         if (!files || files.length === 0) {
             showError(analyzeError, "Please select a directory.", analyzeStatusContainer);
+            console.error("No directory selected or no files found in selected directory.");
             return;
         }
+
+        // --- Partie 1: Mises à jour immédiates de l'interface utilisateur ---
         hideError(analyzeError);
         showSpinner(analyzeSpinner);
+        analyzeBtn.disabled = true; // Désactiver le bouton pour éviter les doubles clics
         hideElement(fileSelectionSection);
         hideElement(generationSection);
         hideElement(resultAndChatArea);
@@ -201,120 +212,92 @@ document.addEventListener('DOMContentLoaded', () => {
         showElement(generateBtn);
         hideElement(regenerateBtn);
 
-        // Si c'est une régénération, préserver le mode de compression actuel
-        if (isRegeneratingFlowActive) {
-            compressionModeToPreserve = compressionValue.value;
-        } else {
-            compressionModeToPreserve = 'none'; // Réinitialiser pour un nouveau flux
-        }
 
-        // Read all files using FileReader and retrieve their full relative path
-        const readFilePromises = [];
-        for (let i = 0; i < files.length; i++) {
-            const file = files[i];
-            readFilePromises.push(new Promise((resolve, reject) => {
-                const reader = new FileReader();
-                reader.onload = () => {
-                    resolve({
-                        name: file.name,
-                        // webkitRelativePath contains the full relative path from the selected directory
-                        path: file.webkitRelativePath || file.name,
-                        content: reader.result
-                    });
-                };
-                reader.onerror = () => {
-                    console.log(`[DEBUG] FileReader.onerror triggered for ${file.name}`);
-                    console.error(`FileReader error for ${file.name}:`, reader.error);
-                    reject(new Error(`Error reading file ${file.name}. See console for details.`));
-                };
-                reader.readAsText(file);
-            }));
-        }
-
-        try {
-            const uploadedFiles = await Promise.all(readFilePromises);
-            currentFilesData = uploadedFiles;
-            // Send the uploaded data to the server to build the file tree and apply .gitignore rules
-            const response = await fetch('/upload', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-                body: JSON.stringify({ files: uploadedFiles })
-            });
-            const data = await response.json();
-            if (!response.ok || !data.success) {
-                throw new Error(data.error || `Error ${response.status}`);
-            }
-            
-            // Store the list of included file paths (not ignored)
-            includedFilePaths = data.files.map(f => f.path);
-            
-            // Render the file tree
-            renderFileList(data.files);
-            
-            hideError(analyzeError); // Clear any instruction/error message from analyze step
-
-            if (isRegeneratingFlowActive) {
-                // Re-apply preserved selection
-                fileListDiv.querySelectorAll('.form-check-input').forEach(checkbox => {
-                    if (selectionToPreserveForRegeneration.has(checkbox.value)) {
-                        checkbox.checked = true;
-                    } else {
-                        checkbox.checked = false; // Ensure others are unchecked
-                    }
-                });
-                selectionToPreserveForRegeneration = new Set(); // Clear after use
-                isRegeneratingFlowActive = false; // Reset flag
-
-                showElement(fileSelectionSection);
-                showElement(generationSection);
-                // Restaurer le mode de compression après l'analyse
-                compressionValue.value = compressionModeToPreserve;
-                // Mettre à jour le label affiché
-                const selectedOption = compressionMenu.querySelector(`[data-value="${compressionModeToPreserve}"]`);
-                if (selectedOption) {
-                    compressionLabel.textContent = selectedOption.textContent.split('(')[0].trim();
-                }
-                compressionModeToPreserve = 'none'; // Réinitialiser après utilisation
-                await executeActualGeneration(); // Automatically generate context
-            } else {
-                // Normal analysis flow: select all by default, then uncheck dev files
-                selectAllBtn.click(); // 1. Check all files initially
-
-                // 2. Uncheck dev files by default
-                fileListDiv.querySelectorAll('.form-check-input').forEach(checkbox => {
-                    if (isDevFile(checkbox.value)) {
-                        checkbox.checked = false;
-                        // If it's a folder, ensure its children are also unchecked
-                        const parentLi = checkbox.closest('li.folder');
-                        if (parentLi) {
-                            parentLi.querySelectorAll('ul .form-check-input').forEach(child => {
-                                child.checked = false;
+        // --- Partie 2: Logique principale différée pour permettre le rafraîchissement de l'interface ---
+        setTimeout(async () => {
+            try {
+                // Read all files using FileReader and retrieve their full relative path
+                const readFilePromises = [];
+                for (let i = 0; i < files.length; i++) {
+                    const file = files[i];
+                    readFilePromises.push(new Promise((resolve, reject) => {
+                        const reader = new FileReader();
+                        reader.onload = () => {
+                            resolve({
+                                name: file.name,
+                                path: file.webkitRelativePath || file.name,
+                                content: reader.result
                             });
+                        };
+                        reader.onerror = () => {
+                            console.error(`FileReader error for ${file.name}:`, reader.error);
+                            reject(new Error(`Error reading file ${file.name}.`));
+                        };
+                        reader.readAsText(file);
+                    }));
+                }
+
+                const uploadedFiles = await Promise.all(readFilePromises);
+                currentFilesData = uploadedFiles;
+                
+                // Send the uploaded data to the server
+                const response = await fetch('/upload', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+                    body: JSON.stringify({ files: uploadedFiles })
+                });
+                const data = await response.json();
+                if (!response.ok || !data.success) {
+                    throw new Error(data.error || `Error ${response.status}`);
+                }
+                
+                includedFilePaths = data.files.map(f => f.path);
+                renderFileList(data.files);
+                hideError(analyzeError);
+
+                if (isRegeneratingFlowActive) {
+                    // Re-apply preserved selection
+                    fileListDiv.querySelectorAll('.form-check-input').forEach(checkbox => {
+                        checkbox.checked = selectionToPreserveForRegeneration.has(checkbox.value);
+                    });
+                    selectionToPreserveForRegeneration.clear();
+                    isRegeneratingFlowActive = false;
+
+                    showElement(fileSelectionSection);
+                    showElement(generationSection);
+                    
+                    // await executeActualGeneration(); // Automatically generate context
+                } else {
+                    // Normal flow
+                    selectAllBtn.click();
+                    fileListDiv.querySelectorAll('.form-check-input').forEach(checkbox => {
+                        if (isDevFile(checkbox.value)) {
+                            checkbox.checked = false;
+                            const parentLi = checkbox.closest('li.folder');
+                            if (parentLi) {
+                                parentLi.querySelectorAll('ul .form-check-input').forEach(child => child.checked = false);
+                            }
                         }
-                    }
-                });
+                    });
+                    fileListDiv.querySelectorAll('li.file .form-check-input').forEach(updateParentCheckboxes);
+                    showElement(fileSelectionSection);
+                    showElement(generationSection);
+                }
 
-                // 3. Update parent folder states after the default uncheck
-                fileListDiv.querySelectorAll('li.file .form-check-input').forEach(fileCheckbox => {
-                    updateParentCheckboxes(fileCheckbox);
-                });
+                if (!generationSection.classList.contains('d-none')) {
+                    generationSection.scrollIntoView({ behavior: 'smooth' });
+                }
 
+            } catch (error) {
+                console.error("Analysis error:", error);
+                showError(analyzeError, `Analysis error: ${error.message}`, analyzeStatusContainer);
+                fileListDiv.innerHTML = '<p class="text-danger text-center placeholder-message">Analysis failed.</p>';
                 showElement(fileSelectionSection);
-                showElement(generationSection);
+            } finally {
+                hideSpinner(analyzeSpinner);
+                analyzeBtn.disabled = false; // Réactiver le bouton
             }
-
-            // Faire défiler vers la section de génération une fois l'analyse terminée
-            if (generationSection.classList.contains('visually-hidden') === false) {
-                generationSection.scrollIntoView({ behavior: 'smooth' });
-            }
-        } catch (error) {
-            console.error("Analysis error:", error);
-            showError(analyzeError, `Analysis error: ${error.message}`, analyzeStatusContainer);
-            fileListDiv.innerHTML = '<p class="text-danger text-center placeholder-message">Analysis failed.</p>';
-            showElement(fileSelectionSection);
-        } finally {
-            hideSpinner(analyzeSpinner);
-        }
+        }, 0); // Le délai de 0 permet au navigateur de redessiner l'interface
     });
 
     // --- Render file tree ---
@@ -729,17 +712,18 @@ document.addEventListener('DOMContentLoaded', () => {
                 displaySecretsAlert(result.summary.secrets_masked, result.summary.files_with_secrets);
 
                 showElement(resultAndChatArea);
-
-                const llmInteractionContainer = document.getElementById('llmInteractionContainer');
-                const startLlmChatBtn = document.getElementById('startLlmChatBtn');
-                const chatUiContainer = document.getElementById('chatUiContainer');
-
+                
+                // Active le bouton du chat interne s'il existe
                 if (llmInteractionContainer) showElement(llmInteractionContainer);
                 if (startLlmChatBtn) showElement(startLlmChatBtn);
-                if (chatUiContainer) hideElement(chatUiContainer);
+                if (chatUiContainer) hideElement(chatUiContainer); // Réinitialise la vue du chat
+                
+                // Active le bouton d'envoi au navigateur si celui-ci est déjà connecté
+                if (browserStatus.textContent === 'Connecté') {
+                    sendContextBtn.disabled = false;
+                }
 
                 resultAndChatArea.scrollIntoView({ behavior: 'smooth' });
-
             } catch (error) {
                 console.error("Generation error:", error);
                 showError(generateError, `Generation error: ${error.message}`, generationSection);
@@ -1020,5 +1004,97 @@ document.addEventListener('DOMContentLoaded', () => {
     // const chatUiContainer = document.getElementById('chatUiContainer');
     // const llmErrorChat = document.getElementById('llm-error-chat'); // Déjà défini plus haut
     // const llmChatSpinner = document.getElementById('llm-chat-spinner'); // Déjà défini plus haut
+
+    // --- Logique pour le pilotage du navigateur ---
+    const launchBrowserBtn = document.getElementById('launchBrowserBtn');
+    const attachBrowserBtn = document.getElementById('attachBrowserBtn');
+    const sendContextBtn = document.getElementById('sendContextBtn');
+    const llmDestinationSelector = document.getElementById('llm-destination-selector');
+    const browserStatus = document.getElementById('browser-status');
+
+    // Socket.IO listener pour les logs du navigateur
+    socket.on('browser_log', (data) => {
+        console.log(`[Browser Log] ${data.message}`);
+        // Optionnellement, afficher dans une zone de log dédiée
+    });
+
+    launchBrowserBtn.addEventListener('click', async () => {
+        const llmType = llmDestinationSelector.value;
+        try {
+            const response = await fetch('/browser/launch', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ llm_type: llmType })
+            });
+            const result = await response.json();
+            console.log(result.message || result.error);
+            if (response.ok) {
+                browserStatus.textContent = 'Launched, awaiting attachment';
+                browserStatus.className = 'badge bg-warning';
+            }
+        } catch (e) {
+            console.error("Erreur lancement navigateur:", e);
+        }
+    });
+
+    attachBrowserBtn.addEventListener('click', async () => {
+        try {
+            const response = await fetch('/browser/attach', { method: 'POST' });
+            const result = await response.json();
+            console.log(result.message || result.error);
+            if (response.ok) {
+                browserStatus.textContent = 'Connected';
+                browserStatus.className = 'badge bg-success';
+                if (markdownOutput.value.trim() !== '') {
+                    sendContextBtn.disabled = false;
+                }
+            } else {
+                // Message d'erreur amélioré
+                browserStatus.textContent = 'Connection failed';
+                browserStatus.className = 'badge bg-danger';
+                alert("Connection failed. Please ensure Chrome is running in debug mode on port 9222. You can use the 'Launch Browser' button to start it correctly.");
+            }
+        } catch (e) {
+            console.error("Erreur attachement navigateur:", e);
+            browserStatus.textContent = 'Communication error';
+            browserStatus.className = 'badge bg-danger';
+            alert("Communication error with the server while trying to attach.");
+        }
+    });
+
+    // Mettre à jour la logique de génération pour activer le bouton d'envoi si le navigateur est déjà attaché
+    // Dans la fonction `executeActualGeneration`, à la fin du `try` où le contexte est généré avec succès :
+    // if (browserStatus.textContent === 'Connecté') {
+    //     sendContextBtn.disabled = false;
+    // }
+    // Pour l'instant, nous le ferons manuellement via la console de test, mais c'est l'idée.
+
+    sendContextBtn.addEventListener('click', async () => {
+        const context = markdownOutput.value;
+        if (!context.trim()) {
+            alert("Le contexte est vide.");
+            return;
+        }
+
+        sendContextBtn.disabled = true;
+        console.log("Envoi du contexte au navigateur...");
+
+        try {
+            const llmType = llmDestinationSelector.value; // Récupérer le type de LLM sélectionné
+            const response = await fetch('/browser/send_context', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ context: context, llm_type: llmType }) // Inclure llm_type
+            });
+            const result = await response.json();
+            console.log(result.message || result.error);
+        } catch (e) {
+            console.error("Erreur lors de l'envoi du contexte:", e);
+        } finally {
+            // On le laisse désactivé pour éviter les double-clics,
+            // l'utilisateur peut le réactiver en relançant si besoin.
+            // Pour une meilleure UX, on pourrait le réactiver après un délai.
+        }
+    });
 
 }); // Fin de DOMContentLoaded
