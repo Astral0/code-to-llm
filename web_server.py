@@ -669,7 +669,7 @@ def upload_directory():
             app.logger.warning(f"Could not perform binary check on {file_path_str}, excluding it. Error: {e}")
             binary_files_detected.append(file_path_str)
 
-    app.logger.info(f"Binary detection complete. Excluded {len(binary_files_detected)} files: {binary_files_detected}")
+    app.logger.info(f"Binary detection complete. Excluded {len(binary_files_detected)} files.")
     uploaded_files = filtered_by_binary_detection # Remplacer la liste par la version filtrée
     # --- FIN DE LA LOGIQUE DE FILTRAGE ---
 

@@ -223,3 +223,21 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 ## 📄 License
 
 This project is licensed under the MIT License - see the LICENSE file for details.
+
+## Mode d'Emploi de l'Application
+
+### Mode Web (pour un environnement standard)
+
+Pour lancer l'application en mode web, suivez ces instructions :
+
+1.  Lancez le serveur Flask en exécutant la commande `python web_server.py`.
+2.  Ouvrez un navigateur web à l'adresse `http://127.0.0.1:5000`.
+3.  Le pilotage du navigateur externe se fait via des scripts Selenium séparés, comme dans le fonctionnement original.
+
+### Mode Bureau (pour un environnement restreint)
+
+Pour lancer l'application en mode bureau, suivez ces instructions :
+
+1.  Lancez l'application de bureau en exécutant la commande `python main_desktop.py`.
+2.  Cela ouvrira une fenêtre d'application native affichant l'interface.
+3.  Le bouton "Démarrer la discussion avec le LLM" ouvrira une seconde fenêtre de navigateur pour l'automatisation.

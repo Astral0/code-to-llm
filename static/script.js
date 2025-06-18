@@ -5,6 +5,52 @@ const socket = io(); // Initialise la connexion Socket.IO
 document.addEventListener('DOMContentLoaded', () => {
     // Lire l'état du streaming depuis l'attribut data du body
     const isLlmStreamEnabled = document.body.dataset.llmStreamEnabled === 'true';
+
+    // --- Détection du mode pywebview au démarrage ---
+    console.log("DEBUG: window.pywebview existe?", !!window.pywebview);
+    
+    // Fonction pour activer le mode pywebview
+    function enablePywebviewMode() {
+        const launchPywebviewBtn = document.getElementById('launchPywebviewBtn');
+        if (launchPywebviewBtn) {
+            launchPywebviewBtn.style.display = 'inline-block';
+        }
+        
+        // Indicateur visuel pour confirmer la détection
+        document.title = "Bureau Mode (PyWebView Détecté)";
+        
+        // Ajouter un badge visible
+        const header = document.querySelector('header h1');
+        if (header) {
+            const badge = document.createElement('span');
+            badge.className = 'badge bg-success ms-2';
+            badge.textContent = 'Mode Desktop';
+            header.appendChild(badge);
+        }
+    }
+    
+    // Essayer la détection immédiate
+    if (window.pywebview) {
+        console.log("Mode pywebview détecté immédiatement");
+        enablePywebviewMode();
+    } else {
+        // Attendre que pywebview soit injecté (peut prendre du temps)
+        let attempts = 0;
+        const maxAttempts = 10;
+        const checkInterval = setInterval(() => {
+            attempts++;
+            if (window.pywebview) {
+                console.log("Mode pywebview détecté après", attempts, "tentatives");
+                clearInterval(checkInterval);
+                enablePywebviewMode();
+            } else if (attempts >= maxAttempts) {
+                console.log("Mode web classique - pywebview non détecté après", maxAttempts, "tentatives");
+                clearInterval(checkInterval);
+                // Activer quand même si on est dans main_desktop.py
+                enablePywebviewMode(); // Puisque nous savons que nous sommes en mode desktop
+            }
+        }, 500);
+    }
     
     // --- DOM element references ---
     const directoryPicker = document.getElementById('directoryPicker');
@@ -183,6 +229,57 @@ document.addEventListener('DOMContentLoaded', () => {
         return messageDiv; // Retourner l'élément pour le streaming
     }
 
+    // --- Fonction pour sauvegarder le dernier répertoire ---
+    function saveLastDirectory(files) {
+        if (files && files.length > 0) {
+            // Récupérer le chemin du premier fichier pour identifier le répertoire
+            const firstFilePath = files[0].webkitRelativePath || files[0].name;
+            const directoryName = firstFilePath.split('/')[0];
+            localStorage.setItem('lastSelectedDirectory', directoryName);
+            console.log("Répertoire sauvegardé:", directoryName);
+        }
+    }
+
+    // --- Fonction pour restaurer le focus sur le dernier répertoire ---
+    function restoreLastDirectory() {
+        const lastDir = localStorage.getItem('lastSelectedDirectory');
+        if (lastDir) {
+            // Ajouter un indicateur visuel pour montrer le dernier répertoire utilisé
+            const directoryLabel = document.querySelector('label[for="directoryPicker"]');
+            if (directoryLabel) {
+                directoryLabel.innerHTML = `Select a directory on your PC: <small class="text-muted">(Dernier: ${lastDir})</small>`;
+            }
+        }
+    }
+
+    // Restaurer l'indicateur du dernier répertoire au chargement
+    restoreLastDirectory();
+
+    // --- Persistance du choix de LLM ---
+    function saveLastLlmChoice() {
+        const llmSelector = document.getElementById('llm-destination-selector');
+        if (llmSelector) {
+            localStorage.setItem('lastSelectedLLM', llmSelector.value);
+        }
+    }
+
+    function restoreLastLlmChoice() {
+        const lastLlm = localStorage.getItem('lastSelectedLLM');
+        const llmSelector = document.getElementById('llm-destination-selector');
+        if (lastLlm && llmSelector) {
+            llmSelector.value = lastLlm;
+        }
+    }
+
+    // Restaurer le choix de LLM au chargement
+    setTimeout(restoreLastLlmChoice, 500); // Attendre que l'élément soit disponible
+
+    // Sauvegarder le choix de LLM quand il change
+    const llmSelector = document.getElementById('llm-destination-selector');
+    if (llmSelector) {
+        llmSelector.addEventListener('change', saveLastLlmChoice);
+    }
+
     // --- Directory analysis (upload of selected files) ---
     analyzeBtn.addEventListener('click', () => {
         console.log("Analyze button clicked.");
@@ -192,6 +289,9 @@ document.addEventListener('DOMContentLoaded', () => {
             console.error("No directory selected or no files found in selected directory.");
             return;
         }
+
+        // Sauvegarder le répertoire sélectionné
+        saveLastDirectory(files);
 
         // --- Partie 1: Mises à jour immédiates de l'interface utilisateur ---
         hideError(analyzeError);
@@ -927,32 +1027,39 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (startLlmChatBtn) {
         startLlmChatBtn.addEventListener('click', async () => {
-            const initialContext = markdownOutput.value;
-            const customInstructions = instructionsTextarea.value;
-            
-            if (!initialContext.trim()) {
-                // Utiliser showError pour une meilleure intégration UI
-                showError(llmErrorChat, "Le contexte Markdown est vide. Veuillez d'abord générer un contexte.", llmChatSpinner);
-                // alert('Le contexte Markdown est vide. Veuillez d'abord générer un contexte.');
-                return;
+            if (window.pywebview) {
+                // Mode Bureau
+                console.log("Mode Bureau détecté. Appel de pywebview.api.launch_browser()");
+                window.pywebview.api.launch_browser();
+            } else {
+                // Mode Web
+                const initialContext = markdownOutput.value;
+                const customInstructions = instructionsTextarea.value;
+
+                if (!initialContext.trim()) {
+                    // Utiliser showError pour une meilleure intégration UI
+                    showError(llmErrorChat, "Le contexte Markdown est vide. Veuillez d'abord générer un contexte.", llmChatSpinner);
+                    // alert('Le contexte Markdown est vide. Veuillez d'abord générer un contexte.');
+                    return;
+                }
+
+                chatHistory = [];
+                chatDisplayArea.innerHTML = '';
+                hideError(llmErrorChat); // Cacher les erreurs précédentes
+
+                let firstUserMessageContent = "Voici le contexte du projet sur lequel je souhaite discuter:\n\n" + initialContext;
+                if (customInstructions.trim()) {
+                    firstUserMessageContent += "\n\nInstructions spécifiques pour cette discussion:\n" + customInstructions;
+                }
+
+                chatHistory.push({ role: 'user', content: firstUserMessageContent });
+                appendMessageToChat('user', "Contexte du projet et instructions initiales envoyés au LLM.");
+
+                chatUiContainer.classList.remove('visually-hidden');
+                startLlmChatBtn.classList.add('visually-hidden');
+
+                await sendChatHistoryToLlm();
             }
-
-            chatHistory = []; 
-            chatDisplayArea.innerHTML = ''; 
-            hideError(llmErrorChat); // Cacher les erreurs précédentes
-            
-            let firstUserMessageContent = "Voici le contexte du projet sur lequel je souhaite discuter:\n\n" + initialContext;
-            if (customInstructions.trim()) {
-                firstUserMessageContent += "\n\nInstructions spécifiques pour cette discussion:\n" + customInstructions;
-            }
-
-            chatHistory.push({ role: 'user', content: firstUserMessageContent });
-            appendMessageToChat('user', "Contexte du projet et instructions initiales envoyés au LLM.");
-
-            chatUiContainer.classList.remove('visually-hidden');
-            startLlmChatBtn.classList.add('visually-hidden');
-            
-            await sendChatHistoryToLlm();
         });
     }
 
@@ -1006,7 +1113,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // const llmChatSpinner = document.getElementById('llm-chat-spinner'); // Déjà défini plus haut
 
     // --- Logique pour le pilotage du navigateur ---
-    const launchBrowserBtn = document.getElementById('launchBrowserBtn');
+    const launchSeleniumBtn = document.getElementById('launchSeleniumBtn');
+    const launchPywebviewBtn = document.getElementById('launchPywebviewBtn');
     const attachBrowserBtn = document.getElementById('attachBrowserBtn');
     const sendContextBtn = document.getElementById('sendContextBtn');
     const llmDestinationSelector = document.getElementById('llm-destination-selector');
@@ -1018,24 +1126,53 @@ document.addEventListener('DOMContentLoaded', () => {
         // Optionnellement, afficher dans une zone de log dédiée
     });
 
-    launchBrowserBtn.addEventListener('click', async () => {
-        const llmType = llmDestinationSelector.value;
-        try {
-            const response = await fetch('/browser/launch', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ llm_type: llmType })
-            });
-            const result = await response.json();
-            console.log(result.message || result.error);
-            if (response.ok) {
-                browserStatus.textContent = 'Launched, awaiting attachment';
-                browserStatus.className = 'badge bg-warning';
+    // Gestionnaire pour le bouton Selenium (ancien launchBrowserBtn)
+    if (launchSeleniumBtn) {
+        launchSeleniumBtn.addEventListener('click', async () => {
+            const llmType = llmDestinationSelector.value;
+            try {
+                const response = await fetch('/browser/launch', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ llm_type: llmType })
+                });
+                const result = await response.json();
+                console.log(result.message || result.error);
+                if (response.ok) {
+                    browserStatus.textContent = 'Launched, awaiting attachment';
+                    browserStatus.className = 'badge bg-warning';
+                }
+            } catch (e) {
+                console.error("Erreur lancement navigateur:", e);
             }
-        } catch (e) {
-            console.error("Erreur lancement navigateur:", e);
-        }
-    });
+        });
+    }
+
+    // Gestionnaire pour le bouton pywebview
+    if (launchPywebviewBtn) {
+        launchPywebviewBtn.addEventListener('click', async () => {
+            console.log("Lancement pywebview browser...");
+            try {
+                // Appeler la fonction Python pywebview
+                if (window.pywebview && window.pywebview.api && window.pywebview.api.launch_pywebview_browser) {
+                    await window.pywebview.api.launch_pywebview_browser();
+                    
+                    // Griser le bouton "Attach to browser" et mettre le statut à "Lancement en cours..."
+                    if (attachBrowserBtn) attachBrowserBtn.disabled = true;
+                    if (browserStatus) {
+                        browserStatus.textContent = 'Lancement en cours...';
+                        browserStatus.className = 'badge bg-info';
+                    }
+                } else {
+                    console.error("API pywebview non disponible");
+                    alert("Erreur : API pywebview non disponible");
+                }
+            } catch (e) {
+                console.error("Erreur lancement pywebview:", e);
+                alert("Erreur lors du lancement de pywebview : " + e.message);
+            }
+        });
+    }
 
     attachBrowserBtn.addEventListener('click', async () => {
         try {
@@ -1080,16 +1217,31 @@ document.addEventListener('DOMContentLoaded', () => {
         console.log("Envoi du contexte au navigateur...");
 
         try {
-            const llmType = llmDestinationSelector.value; // Récupérer le type de LLM sélectionné
-            const response = await fetch('/browser/send_context', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ context: context, llm_type: llmType }) // Inclure llm_type
-            });
-            const result = await response.json();
-            console.log(result.message || result.error);
+            if (window.pywebview && window.pywebview.api && window.pywebview.api.send_context) {
+                // Mode pywebview - appeler directement l'API Python
+                const result = await window.pywebview.api.send_context(context);
+                if (result && result.error) {
+                    alert("Erreur : " + result.error);
+                } else {
+                    console.log("Contexte envoyé avec succès via pywebview");
+                }
+            } else {
+                // Mode web classique - utiliser l'API REST
+                const llmType = llmDestinationSelector.value;
+                const response = await fetch('/browser/send_context', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ context: context, llm_type: llmType })
+                });
+                const result = await response.json();
+                console.log(result.message || result.error);
+                if (result.error) {
+                    alert("Erreur : " + result.error);
+                }
+            }
         } catch (e) {
             console.error("Erreur lors de l'envoi du contexte:", e);
+            alert("Erreur lors de l'envoi du contexte : " + e.message);
         } finally {
             // On le laisse désactivé pour éviter les double-clics,
             // l'utilisateur peut le réactiver en relançant si besoin.
@@ -1098,3 +1250,27 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
 }); // Fin de DOMContentLoaded
+
+// --- Fonction de callback globale pour pywebview ---
+window.onBrowserConnected = function() {
+    console.log("Callback onBrowserConnected appelée depuis Python");
+    const browserStatus = document.getElementById('browser-status');
+    const launchSeleniumBtn = document.getElementById('launchSeleniumBtn');
+    const launchPywebviewBtn = document.getElementById('launchPywebviewBtn');
+    const sendContextBtn = document.getElementById('sendContextBtn');
+    const markdownOutput = document.getElementById('markdownOutput');
+    
+    if (browserStatus) {
+        browserStatus.textContent = 'Connecté (pywebview)';
+        browserStatus.className = 'badge bg-success';
+    }
+    
+    // Griser les deux boutons de lancement pour éviter les lancements multiples
+    if (launchSeleniumBtn) launchSeleniumBtn.disabled = true;
+    if (launchPywebviewBtn) launchPywebviewBtn.disabled = true;
+    
+    // Activer le bouton Send Context si du contexte est disponible
+    if (sendContextBtn && markdownOutput && markdownOutput.value.trim() !== '') {
+        sendContextBtn.disabled = false;
+    }
+};

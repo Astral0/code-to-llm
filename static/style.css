@@ -263,4 +263,13 @@ body {
 /* Style pour les éléments masqués dans le texte */
 .masked-secret {
     background-color: #ffc107;
+    color: #856404;
+    padding: 2px 4px;
+    border-radius: 3px;
+    font-family: monospace;
+}
+
+/* Desktop-only elements visibility control */
+.desktop-only {
+    display: none;
 }
