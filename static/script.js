@@ -1213,7 +1213,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        sendContextBtn.disabled = true;
+        
         console.log("Envoi du contexte au navigateur...");
 
         try {
