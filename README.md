@@ -238,6 +238,12 @@ Pour lancer l'application en mode web, suivez ces instructions :
 
 Pour lancer l'application en mode bureau, suivez ces instructions :
 
-1.  Lancez l'application de bureau en exécutant la commande `python main_desktop.py`.
+1.  Lancez l'application de bureau en exécutant le script `run_desktop.bat`.
 2.  Cela ouvrira une fenêtre d'application native affichant l'interface.
 3.  Le bouton "Démarrer la discussion avec le LLM" ouvrira une seconde fenêtre de navigateur pour l'automatisation.
+
+### Utilisation des scripts
+Pour faciliter l'exécution des commandes, des scripts `.bat` sont fournis :
+- `run_serve.bat` : Lance le serveur web (en français).
+- `run_serve_en.bat` : Lance le serveur web (en anglais).
+- `run_desktop.bat` : Lance l'application de bureau.
