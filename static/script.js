@@ -350,12 +350,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     // Sélectionner tous les fichiers par défaut sauf les fichiers de dev
                     selectAllBtn.click();
                     fileListDiv.querySelectorAll('.form-check-input').forEach(checkbox => {
+                        // On décoche uniquement la case du fichier "dev" lui-même
                         if (isDevFile(checkbox.value)) {
                             checkbox.checked = false;
-                            const parentLi = checkbox.closest('li.folder');
-                            if (parentLi) {
-                                parentLi.querySelectorAll('ul .form-check-input').forEach(child => child.checked = false);
-                            }
                         }
                     });
                     
@@ -496,14 +493,12 @@ document.addEventListener('DOMContentLoaded', () => {
                     // Normal flow
                     selectAllBtn.click();
                     fileListDiv.querySelectorAll('.form-check-input').forEach(checkbox => {
+                        // On décoche uniquement la case du fichier "dev" lui-même
                         if (isDevFile(checkbox.value)) {
                             checkbox.checked = false;
-                            const parentLi = checkbox.closest('li.folder');
-                            if (parentLi) {
-                                parentLi.querySelectorAll('ul .form-check-input').forEach(child => child.checked = false);
-                            }
                         }
                     });
+                    // La fonction suivante s'occupera de mettre à jour l'état des dossiers parents
                     fileListDiv.querySelectorAll('li.file .form-check-input').forEach(updateParentCheckboxes);
                     showElement(fileSelectionSection);
                     showElement(generationSection);
