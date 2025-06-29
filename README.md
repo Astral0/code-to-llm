@@ -241,3 +241,38 @@ Pour lancer l'application en mode bureau, suivez ces instructions :
 1.  Lancez l'application de bureau en exécutant la commande `python main_desktop.py`.
 2.  Cela ouvrira une fenêtre d'application native affichant l'interface.
 3.  Le bouton "Démarrer la discussion avec le LLM" ouvrira une seconde fenêtre de navigateur pour l'automatisation.
+
+## Usage
+
+### Desktop Mode (Recommended for large projects)
+
+The desktop mode avoids file upload issues with large projects (React, Node.js with node_modules, etc.) by reading files directly from disk:
+
+```bash
+python main_desktop.py
+```
+
+**Features:**
+- 🚀 **No file upload limit** - reads directly from disk
+- 📁 **Native directory picker** - system dialog for folder selection  
+- ⚡ **Pre-filtered scanning** - applies .gitignore rules before reading files
+- 💾 **Memory efficient** - processes files on-demand
+- 🔄 **Hybrid interface** - combines desktop APIs with web UI
+
+**Perfect for:**
+- Large React/Angular projects with node_modules
+- Monorepos with multiple packages
+- Projects with extensive build artifacts
+- Any project where file count > 10,000
+
+### Web Interface
+
+```bash
+python web_server.py # Default port 5000
+# or specify a custom port, e.g., 8080
+python web_server.py --port 8080
+```
+
+Then open http://127.0.0.1:5000 (or your custom port) in your browser.
+
+**Note:** Web mode has file upload limitations on large projects.

@@ -9,6 +9,9 @@ import logging
 from selenium.webdriver.common.by import By
 from pywebview_driver import PywebviewDriver
 from web_server import app
+import pathspec
+from pathspec.patterns import GitWildMatchPattern
+from pathlib import Path
 
 # Définir le chemin de stockage des données persistantes
 DATA_DIR = appdirs.user_data_dir('WebAutomationDesktop', 'WebAutomationTools')
@@ -50,6 +53,8 @@ class Api:
         self._main_window = None
         self._browser_window = None
         self.driver = None
+        self.current_directory = None
+        self.file_cache = []
     
     def set_main_window(self, window):
         """Définit la référence à la fenêtre principale"""
@@ -287,6 +292,256 @@ class Api:
             error_message = f"Erreur lors de l'interaction avec la page : {e}"
             logging.error(error_message)
             return {'success': False, 'error': error_message}
+    
+    def scan_local_directory(self, directory_path):
+        """Scanne un répertoire local et applique les règles .gitignore sans upload"""
+        try:
+            if not directory_path or not os.path.exists(directory_path):
+                error_msg = f"Répertoire invalide: {directory_path}"
+                logging.error(error_msg)
+                return {'success': False, 'error': error_msg}
+            
+            self.current_directory = directory_path
+            logging.info(f"Début du scan local du répertoire: {directory_path}")
+            
+            # Charger les règles .gitignore
+            gitignore_spec = self._load_gitignore_spec(directory_path)
+            
+            # Scanner les fichiers
+            scanned_files = self._scan_files_with_gitignore(directory_path, gitignore_spec)
+            
+            # Filtrer les fichiers binaires
+            filtered_files = self._filter_binary_files(scanned_files)
+            
+            # Mettre en cache les fichiers pour un accès rapide
+            self.file_cache = filtered_files
+            
+            # Préparer la structure pour l'affichage
+            file_tree_data = [{"path": f["relative_path"], "size": f["size"]} for f in filtered_files]
+            
+            logging.info(f"Scan terminé: {len(filtered_files)} fichiers trouvés")
+            
+            return {
+                'success': True,
+                'files': file_tree_data,
+                'directory': directory_path,
+                'total_files': len(filtered_files),
+                'debug': {
+                    'gitignore_patterns_count': len(gitignore_spec.patterns) if gitignore_spec else 0
+                }
+            }
+            
+        except Exception as e:
+            error_msg = f"Erreur lors du scan du répertoire: {str(e)}"
+            logging.error(error_msg)
+            return {'success': False, 'error': error_msg}
+    
+    def _load_gitignore_spec(self, directory_path):
+        """Charge les règles .gitignore depuis le répertoire"""
+        try:
+            gitignore_path = os.path.join(directory_path, '.gitignore')
+            patterns = ['.git/', '__pycache__/', 'node_modules/', '.vscode/', '.idea/']
+            
+            if os.path.exists(gitignore_path):
+                with open(gitignore_path, 'r', encoding='utf-8', errors='ignore') as f:
+                    lines = f.readlines()
+                    
+                # Nettoyer les lignes
+                cleaned_lines = [
+                    line.strip() for line in lines 
+                    if line.strip() and not line.strip().startswith('#')
+                ]
+                patterns.extend(cleaned_lines)
+                logging.info(f"Chargé {len(cleaned_lines)} règles depuis .gitignore")
+            else:
+                logging.info("Aucun .gitignore trouvé, utilisation des règles par défaut")
+            
+            return pathspec.PathSpec.from_lines(GitWildMatchPattern, patterns)
+            
+        except Exception as e:
+            logging.warning(f"Erreur lors du chargement de .gitignore: {e}")
+            # Retourner un spec avec seulement les règles par défaut
+            default_patterns = ['.git/', '__pycache__/', 'node_modules/', '.vscode/', '.idea/']
+            return pathspec.PathSpec.from_lines(GitWildMatchPattern, default_patterns)
+    
+    def _scan_files_with_gitignore(self, directory_path, gitignore_spec):
+        """Scanne récursivement les fichiers en appliquant les règles gitignore"""
+        scanned_files = []
+        directory_path = Path(directory_path)
+        
+        try:
+            for file_path in directory_path.rglob('*'):
+                if file_path.is_file():
+                    try:
+                        # Calculer le chemin relatif
+                        relative_path = file_path.relative_to(directory_path).as_posix()
+                        
+                        # Vérifier si le fichier est ignoré
+                        if not gitignore_spec.match_file(relative_path):
+                            file_size = file_path.stat().st_size
+                            scanned_files.append({
+                                'absolute_path': str(file_path),
+                                'relative_path': relative_path,
+                                'name': file_path.name,
+                                'size': file_size
+                            })
+                            
+                            if CONFIG['debug'] and len(scanned_files) % 1000 == 0:
+                                logging.debug(f"Scanné {len(scanned_files)} fichiers...")
+                                
+                    except Exception as file_error:
+                        logging.warning(f"Erreur lors du traitement de {file_path}: {file_error}")
+                        continue
+                        
+        except Exception as e:
+            logging.error(f"Erreur lors du scan récursif: {e}")
+            
+        return scanned_files
+    
+    def _filter_binary_files(self, files):
+        """Filtre les fichiers binaires basé sur l'extension et le contenu"""
+        filtered_files = []
+        binary_extensions = {
+            '.exe', '.dll', '.so', '.dylib', '.bin', '.img', '.iso',
+            '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.svg', '.ico',
+            '.mp3', '.mp4', '.avi', '.mov', '.wav', '.zip', '.rar',
+            '.7z', '.tar', '.gz', '.pdf', '.doc', '.docx', '.xls',
+            '.xlsx', '.ppt', '.pptx', '.woff', '.woff2', '.ttf', '.eot'
+        }
+        
+        for file_info in files:
+            file_path = Path(file_info['absolute_path'])
+            
+            # Filtrer par extension
+            if file_path.suffix.lower() in binary_extensions:
+                if CONFIG['debug']:
+                    logging.debug(f"Ignoré (binaire par extension): {file_info['relative_path']}")
+                continue
+            
+            # Vérifier le contenu pour les petits fichiers
+            try:
+                if file_info['size'] < 1024 * 1024:  # Moins de 1MB
+                    with open(file_path, 'rb') as f:
+                        sample = f.read(1024)
+                        # Si plus de 30% de bytes non-ASCII, considérer comme binaire
+                        non_ascii_count = sum(1 for b in sample if b > 127 or (b < 32 and b not in [9, 10, 13]))
+                        if len(sample) > 0 and (non_ascii_count / len(sample)) > 0.3:
+                            if CONFIG['debug']:
+                                logging.debug(f"Ignoré (binaire par contenu): {file_info['relative_path']}")
+                            continue
+            except Exception:
+                # En cas d'erreur de lecture, ignorer le fichier
+                if CONFIG['debug']:
+                    logging.debug(f"Ignoré (erreur de lecture): {file_info['relative_path']}")
+                continue
+                
+            filtered_files.append(file_info)
+        
+        return filtered_files
+    
+    def get_file_content(self, relative_path):
+        """Récupère le contenu d'un fichier depuis le cache local"""
+        try:
+            if not self.current_directory:
+                return {'success': False, 'error': 'Aucun répertoire scanné'}
+            
+            # Trouver le fichier dans le cache
+            file_info = next((f for f in self.file_cache if f['relative_path'] == relative_path), None)
+            
+            if not file_info:
+                return {'success': False, 'error': f'Fichier non trouvé: {relative_path}'}
+            
+            # Lire le contenu
+            with open(file_info['absolute_path'], 'r', encoding='utf-8', errors='ignore') as f:
+                content = f.read()
+            
+            return {
+                'success': True,
+                'content': content,
+                'path': relative_path,
+                'size': file_info['size']
+            }
+            
+        except Exception as e:
+            error_msg = f"Erreur lors de la lecture du fichier {relative_path}: {str(e)}"
+            logging.error(error_msg)
+            return {'success': False, 'error': error_msg}
+    
+    def generate_context_from_selection(self, selected_files):
+        """Génère le contexte depuis une sélection de fichiers locaux"""
+        try:
+            if not selected_files:
+                return {'success': False, 'error': 'Aucun fichier sélectionné'}
+            
+            context_parts = []
+            total_chars = 0
+            successful_files = 0
+            
+            # En-tête du contexte
+            context_parts.append(f"# Contexte du projet - {os.path.basename(self.current_directory)}")
+            context_parts.append(f"Répertoire: {self.current_directory}")
+            context_parts.append(f"Fichiers inclus: {len(selected_files)}")
+            context_parts.append("")
+            
+            # Générer l'arbre des fichiers
+            tree_lines = self._generate_file_tree(selected_files)
+            context_parts.extend(tree_lines)
+            context_parts.append("")
+            
+            # Ajouter le contenu de chaque fichier
+            for file_path in selected_files:
+                file_result = self.get_file_content(file_path)
+                if file_result['success']:
+                    context_parts.append(f"--- {file_path} ---")
+                    context_parts.append(file_result['content'])
+                    context_parts.append(f"--- FIN {file_path} ---")
+                    context_parts.append("")
+                    total_chars += len(file_result['content'])
+                    successful_files += 1
+                else:
+                    logging.warning(f"Échec lecture fichier: {file_path}")
+            
+            context = "\n".join(context_parts)
+            
+            return {
+                'success': True,
+                'context': context,
+                'stats': {
+                    'total_files': successful_files,
+                    'total_chars': total_chars,
+                    'estimated_tokens': total_chars // 4  # Estimation approximative
+                }
+            }
+            
+        except Exception as e:
+            error_msg = f"Erreur lors de la génération du contexte: {str(e)}"
+            logging.error(error_msg)
+            return {'success': False, 'error': error_msg}
+    
+    def _generate_file_tree(self, selected_files):
+        """Génère un arbre visuel des fichiers sélectionnés"""
+        if not selected_files:
+            return ["## Arbre des fichiers", "Aucun fichier sélectionné"]
+        
+        tree_lines = ["## Arbre des fichiers", "```"]
+        tree_lines.append(f"{os.path.basename(self.current_directory)}/")
+        
+        # Trier les fichiers pour un affichage cohérent
+        sorted_files = sorted(selected_files)
+        
+        # Construire l'arbre
+        for i, file_path in enumerate(sorted_files):
+            is_last = (i == len(sorted_files) - 1)
+            parts = file_path.split('/')
+            
+            # Construire l'indentation
+            prefix = "└── " if is_last else "├── "
+            indent = "    " * (len(parts) - 1)
+            
+            tree_lines.append(f"{indent}{prefix}{parts[-1]}")
+        
+        tree_lines.append("```")
+        return tree_lines
 
 def run_flask():
     app.run(port=5000, debug=False)

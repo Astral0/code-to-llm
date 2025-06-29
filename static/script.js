@@ -134,6 +134,8 @@ document.addEventListener('DOMContentLoaded', () => {
     let includedFilePaths = []; // Will store only the included file paths (not ignored by gitignore)
     let selectionToPreserveForRegeneration = new Set();
     let isRegeneratingFlowActive = false;
+    let isDesktopMode = false; // Mode actuel (desktop vs web)
+    let currentSelectedDirectory = null; // Répertoire sélectionné en mode desktop
 
     let chatHistory = []; // Stocke l'historique : [{role: 'user'/'assistant', content: '...'}, ...]
     let currentAssistantMessageDiv = null; // Pour le streaming
@@ -280,9 +282,130 @@ document.addEventListener('DOMContentLoaded', () => {
         llmSelector.addEventListener('change', saveLastLlmChoice);
     }
 
-    // --- Directory analysis (upload of selected files) ---
+    // --- Nouveaux éléments pour le mode desktop ---
+    const selectDirectoryBtn = document.getElementById('selectDirectoryBtn');
+    const scanDirectoryBtn = document.getElementById('scanDirectoryBtn');
+    const selectedDirectoryPath = document.getElementById('selected-directory-path');
+    
+    // --- Mode Desktop : Sélection de répertoire ---
+    if (selectDirectoryBtn) {
+        selectDirectoryBtn.addEventListener('click', async () => {
+            try {
+                console.log("Demande de sélection de répertoire...");
+                const result = await pywebview.api.select_directory_dialog();
+                
+                if (result.success) {
+                    currentSelectedDirectory = result.directory;
+                    selectedDirectoryPath.textContent = result.directory;
+                    scanDirectoryBtn.classList.remove('d-none');
+                    console.log("Répertoire sélectionné:", result.directory);
+                } else {
+                    console.error("Erreur lors de la sélection:", result.error);
+                    showError(analyzeError, result.error, analyzeStatusContainer);
+                }
+            } catch (error) {
+                console.error("Erreur lors de l'appel à l'API:", error);
+                showError(analyzeError, "Erreur lors de la sélection du répertoire", analyzeStatusContainer);
+            }
+        });
+    }
+
+    // --- Mode Desktop : Scanner le répertoire ---
+    if (scanDirectoryBtn) {
+        scanDirectoryBtn.addEventListener('click', async () => {
+            if (!currentSelectedDirectory) {
+                showError(analyzeError, "Aucun répertoire sélectionné", analyzeStatusContainer);
+                return;
+            }
+
+            console.log("Début du scan du répertoire:", currentSelectedDirectory);
+            isDesktopMode = true;
+            
+            // Interface utilisateur
+            hideError(analyzeError);
+            showSpinner(analyzeSpinner);
+            scanDirectoryBtn.disabled = true;
+            hideElement(fileSelectionSection);
+            hideElement(generationSection);
+            hideElement(resultAndChatArea);
+            fileListDiv.innerHTML = '<p class="text-muted text-center placeholder-message">Scanning directory...</p>';
+            
+            // Réinitialiser l'état
+            currentFilesData = [];
+            includedFilePaths = [];
+            
+            try {
+                const result = await pywebview.api.scan_local_directory(currentSelectedDirectory);
+                
+                if (result.success) {
+                    console.log("Scan terminé:", result);
+                    
+                    // Préparer les données pour l'affichage
+                    includedFilePaths = result.files.map(f => f.path);
+                    currentFilesData = result.files; // Stocker pour utilisation ultérieure
+                    
+                    renderFileList(result.files);
+                    hideError(analyzeError);
+                    
+                    // Sélectionner tous les fichiers par défaut sauf les fichiers de dev
+                    selectAllBtn.click();
+                    fileListDiv.querySelectorAll('.form-check-input').forEach(checkbox => {
+                        if (isDevFile(checkbox.value)) {
+                            checkbox.checked = false;
+                            const parentLi = checkbox.closest('li.folder');
+                            if (parentLi) {
+                                parentLi.querySelectorAll('ul .form-check-input').forEach(child => child.checked = false);
+                            }
+                        }
+                    });
+                    
+                    // Mettre à jour les états des parents
+                    fileListDiv.querySelectorAll('li.file .form-check-input').forEach(updateParentCheckboxes);
+                    
+                    showElement(fileSelectionSection);
+                    showElement(generationSection);
+                    
+                    // Afficher les statistiques
+                    const noteDiv = document.createElement('div');
+                    noteDiv.className = 'alert alert-success mt-3';
+                    noteDiv.innerHTML = `
+                        <div class="d-flex align-items-center">
+                            <i class="fas fa-check-circle me-2"></i>
+                            <div>
+                                <strong>Scan local terminé</strong><br>
+                                <small>
+                                    ${result.total_files} fichiers trouvés • 
+                                    ${result.debug.gitignore_patterns_count} règles .gitignore appliquées
+                                </small>
+                            </div>
+                        </div>
+                    `;
+                    fileListDiv.appendChild(noteDiv);
+                    
+                    generationSection.scrollIntoView({ behavior: 'smooth' });
+                    
+                } else {
+                    console.error("Erreur de scan:", result.error);
+                    showError(analyzeError, `Erreur de scan: ${result.error}`, analyzeStatusContainer);
+                    fileListDiv.innerHTML = '<p class="text-danger text-center placeholder-message">Scan failed.</p>';
+                    showElement(fileSelectionSection);
+                }
+                
+            } catch (error) {
+                console.error("Erreur lors du scan:", error);
+                showError(analyzeError, `Erreur lors du scan: ${error.message}`, analyzeStatusContainer);
+                fileListDiv.innerHTML = '<p class="text-danger text-center placeholder-message">Scan failed.</p>';
+                showElement(fileSelectionSection);
+            } finally {
+                hideSpinner(analyzeSpinner);
+                scanDirectoryBtn.disabled = false;
+            }
+        });
+    }
+
+    // --- Mode Web existant (analyse) ---
     analyzeBtn.addEventListener('click', () => {
-        console.log("Analyze button clicked.");
+        console.log("Analyze button clicked (Web mode).");
         const files = directoryPicker.files;
         if (!files || files.length === 0) {
             showError(analyzeError, "Please select a directory.", analyzeStatusContainer);
@@ -290,6 +413,8 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
+        isDesktopMode = false;
+        
         // Sauvegarder le répertoire sélectionné
         saveLastDirectory(files);
 
@@ -681,7 +806,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // --- Generate context ---
+    // --- Génération de contexte adaptée aux deux modes ---
     async function executeActualGeneration() {
         const selectedCheckboxes = fileListDiv.querySelectorAll('.form-check-input:checked');
         const selectedFiles = Array.from(selectedCheckboxes).map(cb => cb.value).filter(path => {
@@ -693,144 +818,184 @@ document.addEventListener('DOMContentLoaded', () => {
             showError(generateError, "No files selected for context generation.", generationSection);
             return;
         }
+        
         hideError(generateError);
         hideElement(resultAndChatArea);
-
         selectionToPreserveForRegeneration = new Set(selectedFiles);
 
         const enableMasking = enableSecretMaskingCheckbox.checked;
         const maskingOptions = { enable_masking: enableMasking, mask_mode: "mask" };
         const instructions = instructionsTextarea.value;
         const selectedCompression = compressionValue.value;
-        const summarizerModel = summarizerModelSelect ? summarizerModelSelect.value : null;
-        const summarizerMaxWorkers = summarizerWorkersSelect ? summarizerWorkersSelect.value : null;
 
-        if (selectedCompression === 'summarize') {
-            const progressContainer = document.getElementById('summarizer-progress-container');
-            const progressBar = document.getElementById('summarizer-progress-bar');
-            const progressText = document.getElementById('summarizer-progress-text');
-
-            showElement(progressContainer);
-            progressBar.style.width = '0%';
-            progressBar.setAttribute('aria-valuenow', 0);
-            progressText.textContent = 'Starting...';
-            hideSpinner(generateSpinner);
-
-            try {
-                const initialResponse = await fetch('/generate', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        selected_files: selectedFiles,
-                        masking_options: maskingOptions,
-                        instructions: instructions,
-                        compression_mode: selectedCompression,
-                        summarizer_model: summarizerModel,
-                        summarizer_max_workers: summarizerMaxWorkers
-                    })
-                });
-
-                const initialResult = await initialResponse.json();
-                if (!initialResponse.ok || !initialResult.success || !initialResult.task_id) {
-                    throw new Error(initialResult.error || `Failed to start summarization task.`);
-                }
-
-                const taskId = initialResult.task_id;
-                const eventSource = new EventSource(`/summarize_progress?task_id=${taskId}`);
-
-                eventSource.onmessage = (event) => {
-                    const data = JSON.parse(event.data);
-                    if (data.status === 'running') {
-                        const percent = data.total > 0 ? (data.completed / data.total) * 100 : 0;
-                        progressBar.style.width = `${percent}%`;
-                        progressBar.setAttribute('aria-valuenow', percent);
-                        progressText.textContent = `${data.completed} / ${data.total}`;
-                    } else if (data.status === 'error') {
-                        showError(generateError, `Summarization error: ${data.message}`, generationSection);
-                        eventSource.close();
-                        hideElement(progressContainer);
-                        showElement(generateBtn);
-                    }
-                };
-
-                eventSource.addEventListener('done', (event) => {
-                    eventSource.close();
-                    hideElement(progressContainer);
-
-                    const finalResult = JSON.parse(event.data);
-                    if (finalResult.status === 'complete' && finalResult.result && finalResult.result.summary) {
-                        const { markdown, summary } = finalResult.result;
-                        markdownOutput.value = markdown;
-                        displaySummary(summary);
-                        displaySecretsAlert(summary.secrets_masked, summary.files_with_secrets);
-                        showElement(resultAndChatArea);
-                        const llmInteractionContainer = document.getElementById('llmInteractionContainer');
-                        if (llmInteractionContainer) showElement(llmInteractionContainer);
-                        resultAndChatArea.scrollIntoView({ behavior: 'smooth' });
-                    } else {
-                        const errorMessage = finalResult.result ? finalResult.result.error : 'Invalid data structure received on completion.';
-                        throw new Error(errorMessage || 'Summarization completed but returned an invalid result.');
-                    }
-                });
-
-                eventSource.onerror = (err) => {
-                    eventSource.close();
-                    console.error("EventSource failed:", err);
-                    showError(generateError, "Connection to progress stream failed. Please try again.", generationSection);
-                    hideElement(progressContainer);
-                    showElement(generateBtn);
-                };
-
-            } catch (error) {
-                console.error("Summarization error:", error);
-                showError(generateError, `Summarization error: ${error.message}`, generationSection);
-                hideElement(document.getElementById('summarizer-progress-container'));
-                showElement(generateBtn);
-            }
-
-        } else {
+        if (isDesktopMode) {
+            // Mode Desktop : génération locale
+            console.log("Génération en mode Desktop avec fichiers:", selectedFiles);
             showSpinner(generateSpinner);
+            
             try {
-                const response = await fetch('/generate', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        selected_files: selectedFiles,
-                        masking_options: maskingOptions,
-                        instructions: instructions,
-                        compression_mode: selectedCompression,
-                        summarizer_model: summarizerModel,
-                        summarizer_max_workers: summarizerMaxWorkers
-                    })
-                });
-                const result = await response.json();
-                if (!response.ok || !result.success) {
-                    throw new Error(result.error || `Error ${response.status}`);
-                }
-                markdownOutput.value = result.markdown;
-                displaySummary(result.summary);
-                displaySecretsAlert(result.summary.secrets_masked, result.summary.files_with_secrets);
-
-                showElement(resultAndChatArea);
+                const result = await pywebview.api.generate_context_from_selection(selectedFiles);
                 
-                // Active le bouton du chat interne s'il existe
-                if (llmInteractionContainer) showElement(llmInteractionContainer);
-                if (startLlmChatBtn) showElement(startLlmChatBtn);
-                if (chatUiContainer) hideElement(chatUiContainer); // Réinitialise la vue du chat
-                
-                // Active le bouton d'envoi au navigateur si celui-ci est déjà connecté
-                if (browserStatus.textContent === 'Connecté') {
-                    sendContextBtn.disabled = false;
+                if (result.success) {
+                    displayResults(result.context, result.stats);
+                    showElement(resultAndChatArea);
+                    
+                    if (!resultAndChatArea.classList.contains('d-none')) {
+                        resultAndChatArea.scrollIntoView({ behavior: 'smooth' });
+                    }
+                } else {
+                    console.error("Erreur de génération:", result.error);
+                    showError(generateError, `Erreur de génération: ${result.error}`, generationSection);
                 }
-
-                resultAndChatArea.scrollIntoView({ behavior: 'smooth' });
+                
             } catch (error) {
-                console.error("Generation error:", error);
-                showError(generateError, `Generation error: ${error.message}`, generationSection);
+                console.error("Erreur lors de la génération:", error);
+                showError(generateError, `Erreur lors de la génération: ${error.message}`, generationSection);
             } finally {
                 hideSpinner(generateSpinner);
+                showElement(generateBtn);
+            }
+            
+        } else {
+            // Mode Web : génération via serveur (logique existante)
+            if (selectedCompression === 'summarize') {
+                const progressContainer = document.getElementById('summarizer-progress-container');
+                const progressBar = document.getElementById('summarizer-progress-bar');
+                const progressText = document.getElementById('summarizer-progress-text');
+
+                showElement(progressContainer);
+                progressBar.style.width = '0%';
+                progressBar.setAttribute('aria-valuenow', 0);
+                progressText.textContent = 'Starting...';
+                hideSpinner(generateSpinner);
+
+                try {
+                    const initialResponse = await fetch('/generate', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            selected_files: selectedFiles,
+                            masking_options: maskingOptions,
+                            instructions: instructions,
+                            compression_mode: selectedCompression,
+                            summarizer_model: summarizerModelSelect ? summarizerModelSelect.value : null,
+                            summarizer_max_workers: summarizerWorkersSelect ? summarizerWorkersSelect.value : null
+                        })
+                    });
+
+                    const initialResult = await initialResponse.json();
+                    if (!initialResponse.ok || !initialResult.success || !initialResult.task_id) {
+                        throw new Error(initialResult.error || `Failed to start summarization task.`);
+                    }
+
+                    const taskId = initialResult.task_id;
+                    const eventSource = new EventSource(`/summarize_progress?task_id=${taskId}`);
+
+                    eventSource.onmessage = (event) => {
+                        const data = JSON.parse(event.data);
+                        if (data.status === 'running') {
+                            const percent = data.total > 0 ? (data.completed / data.total) * 100 : 0;
+                            progressBar.style.width = `${percent}%`;
+                            progressBar.setAttribute('aria-valuenow', percent);
+                            progressText.textContent = `${data.completed} / ${data.total}`;
+                        } else if (data.status === 'error') {
+                            showError(generateError, `Summarization error: ${data.message}`, generationSection);
+                            eventSource.close();
+                            hideElement(progressContainer);
+                            showElement(generateBtn);
+                        }
+                    };
+
+                    eventSource.addEventListener('done', (event) => {
+                        eventSource.close();
+                        hideElement(progressContainer);
+
+                        const finalResult = JSON.parse(event.data);
+                        if (finalResult.status === 'complete' && finalResult.result && finalResult.result.summary) {
+                            const { markdown, summary } = finalResult.result;
+                            markdownOutput.value = markdown;
+                            displaySummary(summary);
+                            displaySecretsAlert(summary.secrets_masked, summary.files_with_secrets);
+                            showElement(resultAndChatArea);
+                            const llmInteractionContainer = document.getElementById('llmInteractionContainer');
+                            if (llmInteractionContainer) showElement(llmInteractionContainer);
+                            resultAndChatArea.scrollIntoView({ behavior: 'smooth' });
+                        } else {
+                            const errorMessage = finalResult.result ? finalResult.result.error : 'Invalid data structure received on completion.';
+                            throw new Error(errorMessage || 'Summarization completed but returned an invalid result.');
+                        }
+                    });
+
+                    eventSource.onerror = (err) => {
+                        eventSource.close();
+                        console.error("EventSource failed:", err);
+                        showError(generateError, "Connection to progress stream failed. Please try again.", generationSection);
+                        hideElement(progressContainer);
+                        showElement(generateBtn);
+                    };
+
+                } catch (error) {
+                    console.error("Summarization error:", error);
+                    showError(generateError, `Summarization error: ${error.message}`, generationSection);
+                    hideElement(document.getElementById('summarizer-progress-container'));
+                    showElement(generateBtn);
+                }
+
+            } else {
+                showSpinner(generateSpinner);
+                try {
+                    const response = await fetch('/generate', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            selected_files: selectedFiles,
+                            masking_options: maskingOptions,
+                            instructions: instructions,
+                            compression_mode: selectedCompression,
+                            summarizer_model: summarizerModelSelect ? summarizerModelSelect.value : null,
+                            summarizer_max_workers: summarizerWorkersSelect ? summarizerWorkersSelect.value : null
+                        })
+                    });
+                    const data = await response.json();
+                    
+                    if (!response.ok || !data.success) {
+                        throw new Error(data.error || `Error ${response.status}`);
+                    }
+                    
+                    displayResults(data.context, data.summary);
+                    showElement(resultAndChatArea);
+                    
+                    if (!resultAndChatArea.classList.contains('d-none')) {
+                        resultAndChatArea.scrollIntoView({ behavior: 'smooth' });
+                    }
+                    
+                } catch (error) {
+                    console.error("Generation error:", error);
+                    showError(generateError, `Generation error: ${error.message}`, generationSection);
+                } finally {
+                    hideSpinner(generateSpinner);
+                    showElement(generateBtn);
+                }
             }
         }
+    }
+
+    // --- Fonction d'affichage des résultats ---
+    function displayResults(contextContent, stats) {
+        const markdownOutput = document.getElementById('markdownOutput');
+        const summaryContainer = document.getElementById('summaryContainer');
+        
+        if (markdownOutput) {
+            markdownOutput.textContent = contextContent;
+        }
+        
+        if (summaryContainer && stats) {
+            displaySummary(stats);
+        }
+        
+        // Mettre à jour les boutons
+        hideElement(generateBtn);
+        showElement(regenerateBtn);
     }
 
     generateBtn.addEventListener('click', executeActualGeneration);

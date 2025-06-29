@@ -21,16 +21,40 @@
         <i class="fas fa-folder-open"></i> Step 1: Select a local directory
       </div>
       <div class="card-body">
-        <div class="mb-3">
-          <label for="directoryPicker" class="form-label">Select a directory on your PC:</label>
+        <!-- Mode Desktop avec scan local -->
+        <div id="desktop-mode" class="mb-3">
+          <label class="form-label">Mode Desktop - Sélection locale :</label>
+          <div class="d-flex gap-2 align-items-center">
+            <button class="btn btn-outline-primary" type="button" id="selectDirectoryBtn">
+              <i class="fas fa-folder-open"></i> Sélectionner un répertoire
+            </button>
+            <span id="selected-directory-path" class="text-muted"></span>
+          </div>
+          <div class="form-text">
+            Utilise la boîte de dialogue native pour sélectionner un répertoire. Les fichiers seront lus directement depuis le disque.
+          </div>
+          <button class="btn btn-success mt-2 d-none" type="button" id="scanDirectoryBtn">
+            <i class="fas fa-search"></i> Scanner le répertoire
+          </button>
+        </div>
+        
+        <!-- Séparateur -->
+        <div class="text-center my-3">
+          <span class="badge bg-secondary">OU</span>
+        </div>
+        
+        <!-- Mode Web classique -->
+        <div id="web-mode" class="mb-3">
+          <label for="directoryPicker" class="form-label">Mode Web - Upload de fichiers :</label>
           <div class="input-group">
-            <span class="input-group-text"><i class="fas fa-folder"></i></span>
+            <span class="input-group-text"><i class="fas fa-upload"></i></span>
             <input type="file" class="form-control" id="directoryPicker" webkitdirectory directory multiple>
           </div>
           <div class="form-text">
-            Use the selector to choose a local directory. The selected files and folders will be uploaded to generate the context.
+            Sélectionne un répertoire local. Les fichiers seront uploadés pour analyse.
           </div>
         </div>
+        
         <div id="analyze-status" class="mt-2 d-flex align-items-center" style="min-height: 24px;">
           <div id="analyze-spinner" class="spinner-border spinner-border-sm text-primary me-2 d-none" role="status">
             <span class="visually-hidden">Analyzing...</span>
@@ -38,7 +62,7 @@
           <div id="analyze-error" class="alert alert-danger p-1 mb-0 d-none" role="alert" style="font-size: 0.9em;"></div>
         </div>
         <button class="btn btn-primary mt-3" type="button" id="analyzeBtn" title="Analyze directory">
-          <i class="fas fa-search"></i> Analyze directory
+          <i class="fas fa-search"></i> Analyser le répertoire (Upload)
         </button>
       </div>
     </section>
