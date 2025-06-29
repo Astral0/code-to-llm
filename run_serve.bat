@@ -1,33 +1,45 @@
 @echo off
-REM Ce script active un environnement Conda (s'il n'est pas deja actif) et lance un script Python.
+REM Check if conda is in the path
+where conda >nul 2>&1
+if %errorlevel% neq 0 (
+    echo Conda not found in path. Trying Miniconda installation...
+    if exist "C:\APPLIS\miniconda3\Scripts\activate.bat" (
+        call C:\APPLIS\miniconda3\Scripts\activate.bat
+    ) else (
+        echo Miniconda installation not found. Make sure conda is installed.
+        exit /b 1
+    )
+)
 
-echo --- Verification de l'environnement Conda ---
+REM This script activates a Conda environment (if not already active) and runs a Python script.
 
-REM Verifie si l'environnement 'code2llm' est deja actif.
+echo --- Checking Conda environment ---
+
+REM Check if the 'code2llm' environment is already active.
 if "%CONDA_DEFAULT_ENV%"=="code2llm" (
-    echo L'environnement Conda 'code2llm' est deja actif.
+    echo Conda environment 'code2llm' is already active.
 ) else (
-    echo Activation de l'environnement Conda 'code2llm'...
+    echo Activating Conda environment 'code2llm'...
     call conda activate code2llm
 
-    REM Verifie si l'activation a reussi
+    REM Verify if the activation was successful
     if %errorlevel% neq 0 (
         echo.
-        echo ERREUR: Impossible d'activer l'environnement Conda 'code2llm'.
-        echo Verifiez que l'environnement existe et que Conda est dans votre PATH.
+        echo ERROR: Could not activate Conda environment 'code2llm'.
+        echo Verify that the environment exists and that Conda is in your PATH.
         pause
         exit /b %errorlevel%
     )
-    echo Environnement active.
+    echo Environment activated.
 )
 
 echo.
-echo --- Changement de repertoire vers D:\DONNEES\DEV\gpt\code-to-llm ---
-cd /D D:\DONNEES\DEV\gpt\code-to-llm
+echo --- Changing directory to D:\DONNEES\DEV\gpt\code-to-llm ---
+cd /d "%~dp0"
 
-echo --- Lancement du serveur Python ---
+echo --- Launching the Python server ---
 python llm_context_builder.py serve --port 8080
 
 echo.
-echo --- Le script serveur est termine. Appuyez sur une touche pour fermer cette fenetre. ---
+echo --- The server script is finished. Press any key to close this window. ---
 pause
