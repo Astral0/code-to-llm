@@ -829,7 +829,7 @@ document.addEventListener('DOMContentLoaded', () => {
             showSpinner(generateSpinner);
             
             try {
-                const result = await pywebview.api.generate_context_from_selection(selectedFiles);
+                const result = await pywebview.api.generate_context_from_selection(selectedFiles, instructions);
                 
                 if (result.success) {
                     displayResults(result.context, result.stats);

@@ -467,7 +467,7 @@ class Api:
             logging.error(error_msg)
             return {'success': False, 'error': error_msg}
     
-    def generate_context_from_selection(self, selected_files):
+    def generate_context_from_selection(self, selected_files, instructions=""):
         """Génère le contexte depuis une sélection de fichiers locaux"""
         try:
             if not selected_files:
@@ -500,6 +500,12 @@ class Api:
                     successful_files += 1
                 else:
                     logging.warning(f"Échec lecture fichier: {file_path}")
+            
+            if instructions:
+                context_parts.append("--- INSTRUCTIONS ---")
+                context_parts.append(instructions)
+                context_parts.append("--- FIN INSTRUCTIONS ---")
+                context_parts.append("")
             
             context = "\n".join(context_parts)
             
