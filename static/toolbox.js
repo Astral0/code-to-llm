@@ -37,11 +37,20 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // Vérifier si le streaming est activé
-    if (window.pywebview && window.pywebview.api) {
-        window.pywebview.api.get_stream_status().then(status => {
-            isStreamEnabled = status;
-        });
+    async function checkStreamingStatus() {
+        if (window.pywebview && window.pywebview.api) {
+            try {
+                isStreamEnabled = await window.pywebview.api.get_stream_status();
+                console.log('Streaming activé:', isStreamEnabled);
+            } catch (error) {
+                console.error('Erreur lors de la récupération du statut de streaming:', error);
+                isStreamEnabled = false;
+            }
+        }
     }
+    
+    // Appeler la fonction au chargement
+    checkStreamingStatus();
 
     // Fonction pour afficher les erreurs
     function showError(element, message) {
@@ -356,14 +365,68 @@ document.addEventListener('DOMContentLoaded', () => {
             console.log('Envoi de l\'historique édité avec', historyToSend.length, 'messages');
             
             if (window.pywebview && window.pywebview.api) {
-                const response = await window.pywebview.api.send_to_llm(historyToSend, isStreamEnabled);
-                
-                if (response.error) {
-                    showError(llmErrorChat, response.error);
-                    appendMessageToChat('system-error', `Erreur: ${response.error}`);
-                } else if (response.response) {
-                    chatHistory.push({ role: 'assistant', content: response.response });
-                    appendMessageToChat('assistant', response.response, null, chatHistory.length - 1);
+                if (isStreamEnabled) {
+                    // Mode streaming
+                    const callbackId = 'stream_' + Date.now();
+                    let streamingDiv = null;
+                    let streamContent = '';
+                    
+                    // Définir les callbacks pour le streaming
+                    window.onStreamStart = (id) => {
+                        if (id === callbackId) {
+                            streamingDiv = appendMessageToChat('assistant', '', null, chatHistory.length);
+                        }
+                    };
+                    
+                    window.onStreamChunk = (id, chunk) => {
+                        if (id === callbackId && streamingDiv) {
+                            streamContent += chunk;
+                            appendMessageToChat('assistant', streamContent, streamingDiv);
+                        }
+                    };
+                    
+                    window.onStreamEnd = (id) => {
+                        if (id === callbackId) {
+                            // Ajouter à l'historique
+                            chatHistory.push({ role: 'assistant', content: streamContent });
+                            // Nettoyage
+                            delete window.onStreamStart;
+                            delete window.onStreamChunk;
+                            delete window.onStreamEnd;
+                            delete window.onStreamError;
+                        }
+                    };
+                    
+                    window.onStreamError = (id, error) => {
+                        if (id === callbackId) {
+                            showError(llmErrorChat, error);
+                            appendMessageToChat('system-error', `Erreur: ${error}`);
+                            // Nettoyage
+                            delete window.onStreamStart;
+                            delete window.onStreamChunk;
+                            delete window.onStreamEnd;
+                            delete window.onStreamError;
+                        }
+                    };
+                    
+                    // Lancer le streaming
+                    const response = await window.pywebview.api.send_to_llm_stream(historyToSend, callbackId);
+                    
+                    if (response.error) {
+                        showError(llmErrorChat, response.error);
+                        appendMessageToChat('system-error', `Erreur: ${response.error}`);
+                    }
+                } else {
+                    // Mode normal
+                    const response = await window.pywebview.api.send_to_llm(historyToSend, false);
+                    
+                    if (response.error) {
+                        showError(llmErrorChat, response.error);
+                        appendMessageToChat('system-error', `Erreur: ${response.error}`);
+                    } else if (response.response) {
+                        chatHistory.push({ role: 'assistant', content: response.response });
+                        appendMessageToChat('assistant', response.response, null, chatHistory.length - 1);
+                    }
                 }
             } else {
                 showError(llmErrorChat, 'API non disponible.');
@@ -584,6 +647,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
         hideError(llmErrorChat);
         
+        // Vérifier à nouveau le statut du streaming avant l'envoi
+        await checkStreamingStatus();
+        
         // Ajouter le message de l'utilisateur
         chatHistory.push({ role: 'user', content: userMessage });
         appendMessageToChat('user', userMessage, null, chatHistory.length - 1);
@@ -594,6 +660,8 @@ document.addEventListener('DOMContentLoaded', () => {
         sendChatMessageBtn.disabled = true;
         chatMessageInput.disabled = true;
         llmChatSpinner.classList.remove('d-none');
+        
+        console.log('isStreamEnabled avant envoi:', isStreamEnabled, typeof isStreamEnabled);
 
         // Désactiver tous les boutons de prompts actifs
         document.querySelectorAll('.prompt-button.active').forEach(button => {
@@ -618,14 +686,96 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             if (window.pywebview && window.pywebview.api) {
-                const response = await window.pywebview.api.send_to_llm(historyToSend, isStreamEnabled);
-                
-                if (response.error) {
-                    showError(llmErrorChat, response.error);
-                    appendMessageToChat('system-error', `Erreur: ${response.error}`);
-                } else if (response.response) {
-                    chatHistory.push({ role: 'assistant', content: response.response });
-                    appendMessageToChat('assistant', response.response, null, chatHistory.length - 1);
+                if (isStreamEnabled) {
+                    // Mode streaming
+                    console.log('Mode streaming activé');
+                    const callbackId = 'stream_' + Date.now();
+                    let streamingDiv = null;
+                    let streamContent = '';
+                    
+                    // Créer immédiatement la bulle de réponse avec un indicateur de chargement
+                    streamingDiv = appendMessageToChat('assistant', '⏳ En cours de rédaction...', null, chatHistory.length);
+                    console.log('Bulle de streaming créée:', streamingDiv);
+                    
+                    // Définir les callbacks pour le streaming
+                    window.onStreamStart = (id) => {
+                        console.log('Stream start:', id);
+                        if (id === callbackId) {
+                            // La bulle est déjà créée
+                        }
+                    };
+                    
+                    window.onStreamChunk = (id, chunk) => {
+                        console.log('Stream chunk:', id, chunk);
+                        if (id === callbackId && streamingDiv) {
+                            streamContent += chunk;
+                            // Mettre à jour le contenu existant
+                            const contentDiv = streamingDiv.querySelector('.message-content');
+                            if (contentDiv) {
+                                contentDiv.dataset.rawContent = streamContent;
+                                contentDiv.dataset.markdownContent = marked.parse(streamContent);
+                                if (contentDiv.dataset.isMarkdown === 'true') {
+                                    contentDiv.innerHTML = contentDiv.dataset.markdownContent;
+                                } else {
+                                    contentDiv.textContent = streamContent;
+                                }
+                                chatDisplayArea.scrollTop = chatDisplayArea.scrollHeight;
+                            }
+                        }
+                    };
+                    
+                    window.onStreamEnd = (id) => {
+                        console.log('Stream end:', id);
+                        if (id === callbackId) {
+                            // Ajouter à l'historique
+                            chatHistory.push({ role: 'assistant', content: streamContent });
+                            // Nettoyage
+                            delete window.onStreamStart;
+                            delete window.onStreamChunk;
+                            delete window.onStreamEnd;
+                            delete window.onStreamError;
+                        }
+                    };
+                    
+                    window.onStreamError = (id, error) => {
+                        console.log('Stream error:', id, error);
+                        if (id === callbackId) {
+                            showError(llmErrorChat, error);
+                            if (streamingDiv) {
+                                streamingDiv.remove();
+                            }
+                            appendMessageToChat('system-error', `Erreur: ${error}`);
+                            // Nettoyage
+                            delete window.onStreamStart;
+                            delete window.onStreamChunk;
+                            delete window.onStreamEnd;
+                            delete window.onStreamError;
+                        }
+                    };
+                    
+                    // Lancer le streaming
+                    console.log('Appel de send_to_llm_stream avec callbackId:', callbackId);
+                    const response = await window.pywebview.api.send_to_llm_stream(historyToSend, callbackId);
+                    
+                    if (response.error) {
+                        showError(llmErrorChat, response.error);
+                        if (streamingDiv) {
+                            streamingDiv.remove();
+                        }
+                        appendMessageToChat('system-error', `Erreur: ${response.error}`);
+                    }
+                } else {
+                    // Mode normal
+                    console.log('Mode normal (pas de streaming)');
+                    const response = await window.pywebview.api.send_to_llm(historyToSend, false);
+                    
+                    if (response.error) {
+                        showError(llmErrorChat, response.error);
+                        appendMessageToChat('system-error', `Erreur: ${response.error}`);
+                    } else if (response.response) {
+                        chatHistory.push({ role: 'assistant', content: response.response });
+                        appendMessageToChat('assistant', response.response, null, chatHistory.length - 1);
+                    }
                 }
             } else {
                 showError(llmErrorChat, 'API non disponible.');

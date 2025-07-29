@@ -52,6 +52,7 @@ class Api:
     def __init__(self):
         self._main_window = None
         self._browser_window = None
+        self._toolbox_window = None
         self.driver = None
         self.current_directory = None
         self.file_cache = []
@@ -558,7 +559,7 @@ class Api:
             logging.info("Ouverture de la fenêtre Toolbox Développeur")
             
             # Créer la fenêtre Toolbox
-            toolbox_window = webview.create_window(
+            self._toolbox_window = webview.create_window(
                 "Toolbox Développeur Augmenté",
                 "http://127.0.0.1:5000/toolbox",
                 js_api=self,  # Partager la même API
@@ -698,6 +699,126 @@ class Api:
         except:
             return False
     
+    def send_to_llm_stream(self, chat_history, callback_id):
+        """Envoie l'historique au LLM en mode streaming avec callback vers le frontend"""
+        logging.info(f"send_to_llm_stream appelé avec callback_id: {callback_id}")
+        try:
+            import requests
+            import json
+            
+            # Lire la configuration LLM
+            config = configparser.ConfigParser()
+            config.read('config.ini', encoding='utf-8')
+            
+            if not config.getboolean('LLMServer', 'enabled', fallback=False):
+                return {'error': 'LLM feature is not enabled in config.ini'}
+            
+            llm_url = config.get('LLMServer', 'url', fallback='')
+            llm_apikey = config.get('LLMServer', 'apikey', fallback='')
+            llm_model = config.get('LLMServer', 'model', fallback='')
+            llm_api_type = config.get('LLMServer', 'api_type', fallback='openai').lower()
+            ssl_verify = config.getboolean('LLMServer', 'ssl_verify', fallback=True)
+            
+            if not llm_url or not llm_model:
+                return {'error': 'LLM server configuration is incomplete in config.ini'}
+            
+            headers = {"Content-Type": "application/json"}
+            if llm_apikey:
+                headers["Authorization"] = f"Bearer {llm_apikey}"
+            
+            if llm_api_type == "openai":
+                payload = {
+                    "model": llm_model,
+                    "messages": chat_history,
+                    "stream": True
+                }
+                target_url = llm_url.rstrip('/') 
+                if not target_url.endswith('/chat/completions'):
+                    target_url += '/chat/completions' if '/v1' in target_url else '/v1/chat/completions'
+            else:  # ollama
+                prompt = "\n\n".join([f"{msg['role'].upper()}: {msg['content']}" for msg in chat_history])
+                payload = {
+                    "model": llm_model,
+                    "prompt": prompt,
+                    "stream": True
+                }
+                target_url = llm_url.rstrip('/') + "/api/generate"
+            
+            logging.info(f"Sending streaming request to LLM at {target_url}")
+            logging.info(f"Toolbox window exists: {self._toolbox_window is not None}")
+            
+            if not ssl_verify:
+                import urllib3
+                urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+            
+            response = requests.post(target_url, headers=headers, json=payload, stream=True, verify=ssl_verify)
+            response.raise_for_status()
+            
+            full_response = ""
+            chunk_count = 0
+            
+            # Envoyer un callback pour démarrer le streaming
+            if self._toolbox_window:
+                logging.info(f"Envoi de onStreamStart pour {callback_id}")
+                self._toolbox_window.evaluate_js(f'window.onStreamStart && window.onStreamStart("{callback_id}")')
+            
+            for line in response.iter_lines():
+                if line:
+                    line_str = line.decode('utf-8')
+                    
+                    if llm_api_type == "openai":
+                        if line_str.startswith("data: "):
+                            if line_str.strip() == "data: [DONE]":
+                                break
+                            try:
+                                json_data = json.loads(line_str[6:])
+                                if 'choices' in json_data and len(json_data['choices']) > 0:
+                                    delta = json_data['choices'][0].get('delta', {})
+                                    if 'content' in delta:
+                                        chunk = delta['content']
+                                        full_response += chunk
+                                        # Envoyer le chunk au frontend
+                                        if self._toolbox_window:
+                                            chunk_count += 1
+                                            if chunk_count % 10 == 1:  # Log tous les 10 chunks
+                                                logging.info(f"Envoi du chunk {chunk_count}: {chunk[:20]}...")
+                                            escaped_chunk = chunk.replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n')
+                                            self._toolbox_window.evaluate_js(f'window.onStreamChunk && window.onStreamChunk("{callback_id}", "{escaped_chunk}")')
+                            except json.JSONDecodeError:
+                                continue
+                    else:  # ollama
+                        try:
+                            json_data = json.loads(line_str)
+                            if 'response' in json_data:
+                                chunk = json_data['response']
+                                full_response += chunk
+                                # Envoyer le chunk au frontend
+                                if self._toolbox_window:
+                                    escaped_chunk = chunk.replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n')
+                                    self._toolbox_window.evaluate_js(f'window.onStreamChunk && window.onStreamChunk("{callback_id}", "{escaped_chunk}")')
+                                
+                                if json_data.get('done', False):
+                                    break
+                        except json.JSONDecodeError:
+                            continue
+            
+            # Envoyer la fin du streaming
+            logging.info(f"Streaming terminé, {chunk_count} chunks envoyés, taille totale: {len(full_response)}")
+            if self._toolbox_window:
+                logging.info(f"Envoi de onStreamEnd pour {callback_id}")
+                self._toolbox_window.evaluate_js(f'window.onStreamEnd && window.onStreamEnd("{callback_id}")')
+            
+            return {'response': full_response}
+            
+        except Exception as e:
+            error_msg = f"Erreur lors du streaming: {str(e)}"
+            logging.error(error_msg)
+            # Envoyer l'erreur au frontend
+            if self._toolbox_window:
+                escaped_error = error_msg.replace('\\', '\\\\').replace('"', '\\"')
+                self._toolbox_window.evaluate_js(f'window.onStreamError && window.onStreamError("{callback_id}", "{escaped_error}")')
+            return {'error': error_msg}
+    
     def send_to_llm(self, chat_history, stream=False):
         """Envoie l'historique du chat au LLM et retourne la réponse"""
         try:
@@ -755,9 +876,43 @@ class Api:
             response.raise_for_status()
             
             if stream:
-                # Pour le streaming, on devrait traiter ligne par ligne
-                # mais pour simplifier, on retourne juste la réponse
-                return {'response': 'Streaming not fully implemented yet'}
+                # Pour le streaming, collecter toute la réponse
+                full_response = ""
+                try:
+                    for line in response.iter_lines():
+                        if line:
+                            line_str = line.decode('utf-8')
+                            
+                            if llm_api_type == "openai":
+                                # Format OpenAI : data: {...}
+                                if line_str.startswith("data: "):
+                                    if line_str.strip() == "data: [DONE]":
+                                        break
+                                    try:
+                                        json_data = json.loads(line_str[6:])
+                                        if 'choices' in json_data and len(json_data['choices']) > 0:
+                                            delta = json_data['choices'][0].get('delta', {})
+                                            if 'content' in delta:
+                                                full_response += delta['content']
+                                    except json.JSONDecodeError:
+                                        continue
+                            else:  # ollama
+                                # Format Ollama : ligne JSON directe
+                                try:
+                                    json_data = json.loads(line_str)
+                                    if 'response' in json_data:
+                                        full_response += json_data['response']
+                                        
+                                        # Vérifier si c'est le dernier message
+                                        if json_data.get('done', False):
+                                            break
+                                except json.JSONDecodeError:
+                                    continue
+                    
+                    return {'response': full_response}
+                except Exception as e:
+                    logging.error(f"Erreur lors du streaming: {e}")
+                    return {'error': f"Erreur lors du streaming: {str(e)}"}
             else:
                 if llm_api_type == "openai":
                     result = response.json()
