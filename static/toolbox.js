@@ -301,8 +301,10 @@ document.addEventListener('DOMContentLoaded', () => {
             // Tronquer l'historique du chat
             chatHistory = chatHistory.slice(0, messageIndex + 1);
             
-            // Mettre à jour le contenu du message
+            // Mettre à jour le contenu du message dans l'historique
             chatHistory[messageIndex].content = newContent;
+            
+            // Pour l'affichage, on garde le nouveau contenu sans le contexte
             contentDiv.dataset.rawContent = newContent;
             contentDiv.dataset.markdownContent = marked.parse(newContent);
             
@@ -338,6 +340,20 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             // Préparer l'historique complet
             let historyToSend = [...chatHistory];
+            
+            // S'assurer que le contexte est inclus dans le premier message s'il existe
+            if (historyToSend.length > 0 && mainContext) {
+                const firstMessage = historyToSend[0].content;
+                const contextPrefix = 'Voici le contexte du projet sur lequel je souhaite discuter:';
+                
+                // Toujours ajouter le contexte au premier message pour l'envoi
+                historyToSend[0] = {
+                    role: 'user',
+                    content: `${contextPrefix}\n\n${mainContext}\n\n${firstMessage}`
+                };
+            }
+            
+            console.log('Envoi de l\'historique édité avec', historyToSend.length, 'messages');
             
             if (window.pywebview && window.pywebview.api) {
                 const response = await window.pywebview.api.send_to_llm(historyToSend, isStreamEnabled);
@@ -586,18 +602,19 @@ document.addEventListener('DOMContentLoaded', () => {
         activePrompts.clear();
 
         try {
-            // Préparer l'historique complet avec le contexte si c'est le premier message
+            // Préparer l'historique complet
             let historyToSend = [...chatHistory];
-            if (chatHistory.length === 1 && mainContext) {
-                // Premier message, ajouter le contexte au début
-                historyToSend = [
-                    { 
-                        role: 'user', 
-                        content: `Voici le contexte du projet sur lequel je souhaite discuter:\n\n${mainContext}\n\n${userMessage}`
-                    }
-                ];
-                // Mettre à jour l'historique local pour refléter cela
-                chatHistory[0].content = historyToSend[0].content;
+            
+            // S'assurer que le contexte est inclus dans le premier message s'il existe
+            if (historyToSend.length > 0 && mainContext) {
+                const firstUserMessage = historyToSend[0].content;
+                const contextPrefix = 'Voici le contexte du projet sur lequel je souhaite discuter:';
+                
+                // Ajouter le contexte au premier message pour l'envoi
+                historyToSend[0] = {
+                    role: 'user',
+                    content: `${contextPrefix}\n\n${mainContext}\n\n${firstUserMessage}`
+                };
             }
 
             if (window.pywebview && window.pywebview.api) {
