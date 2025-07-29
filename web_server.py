@@ -597,6 +597,7 @@ def favicon():
 @app.route('/')
 def index():
     app.logger.info("Received request for '/' - Serving index.html")
+    app.logger.info(f"LLM_SERVER_ENABLED value: {LLM_SERVER_ENABLED}")
     return render_template('index.html',
                            instruction_text_1=INSTRUCTION_TEXT_1,
                            instruction_text_2=INSTRUCTION_TEXT_2,
@@ -606,6 +607,11 @@ def index():
                            summarizer_llm_models_list=SUMMARIZER_LLM_MODELS_LIST, # Add this
                            summarizer_max_workers=SUMMARIZER_MAX_WORKERS,     # Add this
                            has_md_files=analysis_cache.get('has_md_files', False))
+
+@app.route('/toolbox')
+def toolbox():
+    app.logger.info("Received request for '/toolbox' - Serving toolbox.html")
+    return render_template('toolbox.html')
 
 @app.route('/upload', methods=['POST'])
 def upload_directory():
@@ -1289,3 +1295,81 @@ def summarize_code():
     except Exception as e:
         app.logger.error(f"Unexpected error in summarize_code: {e}", exc_info=True)
         return jsonify({"error": f"Unexpected server error: {str(e)}"}), 500
+
+@app.route('/api/llm/chat', methods=['POST'])
+def llm_chat():
+    """API endpoint pour le chat avec le LLM depuis la Toolbox"""
+    if not LLM_SERVER_ENABLED:
+        return jsonify({"error": "LLM feature is not enabled in config.ini"}), 400
+    
+    if not LLM_SERVER_URL or not LLM_SERVER_MODEL:
+        return jsonify({"error": "LLM server configuration is incomplete in config.ini"}), 400
+    
+    data = request.get_json()
+    messages = data.get('messages', [])
+    stream = data.get('stream', False)
+    
+    if not messages:
+        return jsonify({"error": "No messages provided"}), 400
+    
+    app.logger.info(f"Sending chat to LLM with {len(messages)} messages (streaming: {stream})")
+    
+    headers = {"Content-Type": "application/json"}
+    if LLM_SERVER_APIKEY:
+        headers["Authorization"] = f"Bearer {LLM_SERVER_APIKEY}"
+    
+    try:
+        if LLM_SERVER_API_TYPE == "openai":
+            payload = {
+                "model": LLM_SERVER_MODEL,
+                "messages": messages,
+                "stream": stream
+            }
+            target_url = LLM_SERVER_URL.rstrip('/') + "/chat/completions"
+        else:  # ollama
+            # Pour Ollama, on doit formater différemment
+            # Concaténer tous les messages en un seul prompt
+            prompt = "\n\n".join([f"{msg['role'].upper()}: {msg['content']}" for msg in messages])
+            payload = {
+                "model": LLM_SERVER_MODEL,
+                "prompt": prompt,
+                "stream": stream
+            }
+            target_url = LLM_SERVER_URL.rstrip('/') + "/api/generate"
+        
+        if stream and LLM_SERVER_STREAM_RESPONSE:
+            # Pour le streaming, on retourne directement la réponse
+            response = requests.post(target_url, headers=headers, json=payload, stream=True)
+            response.raise_for_status()
+            
+            def generate():
+                for line in response.iter_lines():
+                    if line:
+                        yield line.decode('utf-8') + '\n\n'
+            
+            return Response(generate(), mimetype='text/event-stream')
+        else:
+            # Mode non-stream
+            response = requests.post(target_url, headers=headers, json=payload)
+            response.raise_for_status()
+            
+            if LLM_SERVER_API_TYPE == "openai":
+                result = response.json()
+                assistant_message = result['choices'][0]['message']['content']
+            else:  # ollama
+                result = response.json()
+                assistant_message = result.get('response', '')
+            
+            return jsonify({"response": assistant_message})
+            
+    except requests.exceptions.HTTPError as http_err:
+        error_details = "Unknown error"
+        try:
+            error_details = http_err.response.json()
+        except:
+            error_details = http_err.response.text
+        app.logger.error(f"HTTP error calling LLM: {http_err} - Details: {error_details}")
+        return jsonify({"error": f"HTTP error: {http_err}", "details": error_details}), 500
+    except Exception as e:
+        app.logger.error(f"Error in llm_chat: {e}", exc_info=True)
+        return jsonify({"error": str(e)}), 500

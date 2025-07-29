@@ -12,7 +12,8 @@ apikey = YOUR_LLM_API_KEY_HERE
 model = YOUR_LLM_MODEL_HERE
 api_type = openai # Can be 'openai' or 'ollama'
 enabled = false
-stream_response = false
+stream_response = true
+ssl_verify = true # Set to false to disable SSL certificate verification (use with caution)
 
 [SummarizerLLM]
 # LLM pour le RESUME du code (compression "lossy")
@@ -38,6 +39,12 @@ submit_button_selector = button.send-button
 
 [Tokens]
 # Optional: API key for token calculation services if you use one
+
+[Git]
+# Chemin vers l'exécutable git (optionnel - laissez vide pour utiliser git du PATH)
+# Exemple Windows: C:\Program Files\Git\bin\git.exe
+# Exemple Linux/Mac: /usr/bin/git
+executable_path = 
 
 [BinaryDetection]
 # Fichiers immédiatement rejetés (séparés par des virgules)

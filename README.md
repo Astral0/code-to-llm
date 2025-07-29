@@ -13,6 +13,7 @@ A tool for preparing code repositories for LLM analysis and modification. Create
 - **CLI Support**: Command-line interface for automation and scripts
 - **Sensitive Data Protection**: Detects and masks API keys, passwords, tokens and other credentials
 - **Token Estimation**: Provides approximate token count for LLM context windows
+- **Developer Toolbox** (Desktop Mode): Advanced AI-powered development assistant with prompt library
 
 ### Web Interface Features
 
@@ -71,6 +72,10 @@ enabled = false               # Set to true to enable LLM interaction features
 stream_response = false       # Set to true to enable streaming responses from the LLM
 
 [Tokens]
+
+[Git]
+# Path to git executable (optional - leave empty to use git from PATH)
+executable_path = 
 ```
 
 ### Web Interface
@@ -82,6 +87,20 @@ python web_server.py --port 8080
 ```
 
 Then open http://127.0.0.1:5000 (or your custom port) in your browser.
+
+### Desktop Mode with Developer Toolbox
+
+The Desktop Mode provides an enhanced experience with native file system access and the Developer Toolbox:
+
+```bash
+python main_desktop.py
+```
+
+Features:
+- **Native Directory Selection**: Direct file system access without uploads
+- **Developer Toolbox**: AI-powered assistant for code analysis and development
+- **Prompt Library**: Pre-configured prompts for common development tasks
+- **Git Integration**: Analyze your recent changes with `git diff`
 
 ### Command Line
 
@@ -170,6 +189,52 @@ The security scanning uses two complementary approaches:
 
 1. **detect-secrets library**: Uses a variety of detectors for different types of secrets
 2. **Custom regex patterns**: Additional patterns for common credential formats
+
+## 🧰 Developer Toolbox (Desktop Mode Only)
+
+The Developer Toolbox is an advanced AI-powered assistant integrated into the Desktop Mode. It provides a comprehensive set of tools for code analysis, development planning, and code review.
+
+### Available Prompts
+
+The toolbox includes pre-configured prompts in the `prompts/` directory:
+
+1. **General Analysis** (`01_analyse_generale.md`): Comprehensive project architecture review
+   - Architecture and structure analysis
+   - Identification of strengths and improvement areas
+   - Technical stack summary
+
+2. **Security Analysis** (`02_analyse_securite.md`): Security-focused code audit
+   - Vulnerability detection
+   - Risk assessment (Critical/High/Medium/Low)
+   - Security recommendations
+
+3. **Feature Planning** (`03_plan_action_fonctionnalite.md`): Detailed implementation planning
+   - Step-by-step action plans
+   - File modifications needed
+   - Testing strategy
+
+4. **Code Review** (`04_revue_de_diff.md`): Review of recent changes
+   - Automatic git diff integration
+   - Quality assessment
+   - Improvement suggestions
+
+### Using the Toolbox
+
+1. **Open the Toolbox**: Click "Open Developer Toolbox" button in Desktop Mode
+2. **Import Project Context**: Import the context from your main window
+3. **Select Prompts**: Choose from the prompt library or write custom queries
+4. **Git Integration**: Use "Analyze my recent changes" to review uncommitted work
+
+### Customizing Prompts
+
+You can add your own prompts by creating new `.md` files in the `prompts/` directory:
+
+```markdown
+# prompts/05_custom_analysis.md
+Your custom prompt content here...
+```
+
+The toolbox will automatically detect and display new prompts.
 
 ## 🔄 Output Format
 

@@ -1,0 +1,2 @@
+Un outil pour scanner et formater des projets de code afin de générer un contexte optimisé pour les LLMs.
+Il évolue en une "Toolbox Développeur" interactive pour dialoguer avec une IA sur l'analyse, la conception et la revue de code.

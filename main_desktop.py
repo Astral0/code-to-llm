@@ -509,6 +509,9 @@ class Api:
             
             context = "\n".join(context_parts)
             
+            # Stocker le contexte pour la Toolbox
+            self._last_generated_context = context
+            
             return {
                 'success': True,
                 'context': context,
@@ -548,6 +551,236 @@ class Api:
         
         tree_lines.append("```")
         return tree_lines
+    
+    def open_toolbox_window(self):
+        """Ouvre une nouvelle fenêtre pour la Toolbox Développeur"""
+        try:
+            logging.info("Ouverture de la fenêtre Toolbox Développeur")
+            
+            # Créer la fenêtre Toolbox
+            toolbox_window = webview.create_window(
+                "Toolbox Développeur Augmenté",
+                "http://127.0.0.1:5000/toolbox",
+                js_api=self,  # Partager la même API
+                width=1400,
+                height=800,
+                min_size=(1200, 600)
+            )
+            
+            return {'success': True, 'message': 'Fenêtre Toolbox ouverte avec succès'}
+            
+        except Exception as e:
+            error_msg = f"Erreur lors de l'ouverture de la Toolbox: {str(e)}"
+            logging.error(error_msg)
+            return {'success': False, 'error': error_msg}
+    
+    def get_available_prompts(self):
+        """Retourne la liste des prompts disponibles dans le répertoire prompts/"""
+        try:
+            prompts_dir = os.path.join(os.path.dirname(__file__), 'prompts')
+            logging.info(f"Recherche des prompts dans: {prompts_dir}")
+            
+            if not os.path.exists(prompts_dir):
+                logging.warning(f"Le répertoire prompts n'existe pas: {prompts_dir}")
+                return []
+            
+            prompts = []
+            files = sorted(os.listdir(prompts_dir))
+            logging.info(f"Fichiers trouvés dans prompts/: {files}")
+            
+            for filename in files:
+                if filename.endswith('.md'):
+                    # Extraire le nom sans l'extension et le numéro
+                    name = filename.replace('.md', '')
+                    if name.startswith('0') and '_' in name:
+                        # Enlever le numéro de préfixe (ex: "01_" devient "")
+                        name = name.split('_', 1)[1].replace('_', ' ').title()
+                    
+                    prompts.append({
+                        'filename': filename,
+                        'name': name
+                    })
+                    logging.info(f"Prompt ajouté: {filename} -> {name}")
+            
+            logging.info(f"Total des prompts trouvés: {len(prompts)}")
+            return prompts
+            
+        except Exception as e:
+            logging.error(f"Erreur lors de la lecture des prompts: {str(e)}")
+            return []
+    
+    def get_prompt_content(self, filename):
+        """Retourne le contenu d'un fichier de prompt"""
+        try:
+            prompts_dir = os.path.join(os.path.dirname(__file__), 'prompts')
+            file_path = os.path.join(prompts_dir, filename)
+            
+            # Vérification de sécurité pour éviter la traversée de répertoire
+            if not os.path.abspath(file_path).startswith(os.path.abspath(prompts_dir)):
+                raise ValueError("Chemin de fichier non autorisé")
+            
+            if os.path.exists(file_path) and file_path.endswith('.md'):
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    return f.read()
+            else:
+                raise FileNotFoundError(f"Prompt non trouvé: {filename}")
+                
+        except Exception as e:
+            error_msg = f"Erreur lors de la lecture du prompt: {str(e)}"
+            logging.error(error_msg)
+            raise Exception(error_msg)
+    
+    def run_git_diff(self):
+        """Exécute git diff HEAD et retourne le résultat"""
+        try:
+            import subprocess
+            
+            # Lire la configuration pour le chemin git
+            config = configparser.ConfigParser()
+            config.read('config.ini', encoding='utf-8')
+            git_path = config.get('Git', 'executable_path', fallback='git').strip()
+            
+            if not git_path:
+                git_path = 'git'
+            
+            # Vérifier que nous sommes dans le répertoire de travail
+            if not self.current_directory:
+                return {'error': 'Aucun répertoire de travail sélectionné'}
+            
+            # Construire la commande
+            git_command = [git_path, 'diff', 'HEAD']
+            logging.info(f"Exécution de la commande: {' '.join(git_command)}")
+            logging.info(f"Dans le répertoire: {self.current_directory}")
+            
+            # Exécuter git diff HEAD
+            result = subprocess.run(
+                git_command,
+                cwd=self.current_directory,
+                capture_output=True,
+                text=True,
+                encoding='utf-8'
+            )
+            
+            if result.returncode != 0:
+                # Vérifier si c'est parce que ce n'est pas un repo git
+                if "not a git repository" in result.stderr.lower():
+                    logging.warning(f"Le répertoire {self.current_directory} n'est pas un dépôt git")
+                    return {'error': 'Le répertoire actuel n\'est pas un dépôt git'}
+                else:
+                    logging.error(f"Erreur git: {result.stderr}")
+                    return {'error': f'Erreur git: {result.stderr}'}
+            
+            diff_size = len(result.stdout)
+            diff_lines = result.stdout.count('\n')
+            logging.info(f"Git diff exécuté avec succès: {diff_size} caractères, {diff_lines} lignes")
+            
+            return {'diff': result.stdout}
+            
+        except FileNotFoundError:
+            return {'error': 'Git n\'est pas installé ou le chemin est incorrect. Vérifiez config.ini'}
+        except Exception as e:
+            error_msg = f"Erreur lors de l'exécution de git diff: {str(e)}"
+            logging.error(error_msg)
+            return {'error': error_msg}
+    
+    def get_main_context(self):
+        """Retourne le contexte principal généré précédemment"""
+        if hasattr(self, '_last_generated_context'):
+            return self._last_generated_context
+        return ""
+    
+    def get_stream_status(self):
+        """Retourne l'état du streaming LLM"""
+        try:
+            config = configparser.ConfigParser()
+            config.read('config.ini', encoding='utf-8')
+            return config.getboolean('LLMServer', 'stream_response', fallback=False)
+        except:
+            return False
+    
+    def send_to_llm(self, chat_history, stream=False):
+        """Envoie l'historique du chat au LLM et retourne la réponse"""
+        try:
+            import requests
+            import json
+            
+            # Lire la configuration LLM
+            config = configparser.ConfigParser()
+            config.read('config.ini', encoding='utf-8')
+            
+            if not config.getboolean('LLMServer', 'enabled', fallback=False):
+                return {'error': 'LLM feature is not enabled in config.ini'}
+            
+            llm_url = config.get('LLMServer', 'url', fallback='')
+            llm_apikey = config.get('LLMServer', 'apikey', fallback='')
+            llm_model = config.get('LLMServer', 'model', fallback='')
+            llm_api_type = config.get('LLMServer', 'api_type', fallback='openai').lower()
+            ssl_verify = config.getboolean('LLMServer', 'ssl_verify', fallback=True)
+            
+            if not llm_url or not llm_model:
+                return {'error': 'LLM server configuration is incomplete in config.ini'}
+            
+            headers = {"Content-Type": "application/json"}
+            if llm_apikey:
+                headers["Authorization"] = f"Bearer {llm_apikey}"
+            
+            if llm_api_type == "openai":
+                payload = {
+                    "model": llm_model,
+                    "messages": chat_history,
+                    "stream": stream
+                }
+                target_url = llm_url.rstrip('/') 
+                if not target_url.endswith('/chat/completions'):
+                    target_url += '/chat/completions' if '/v1' in target_url else '/v1/chat/completions'
+            else:  # ollama
+                prompt = "\n\n".join([f"{msg['role'].upper()}: {msg['content']}" for msg in chat_history])
+                payload = {
+                    "model": llm_model,
+                    "prompt": prompt,
+                    "stream": stream
+                }
+                target_url = llm_url.rstrip('/') + "/api/generate"
+            
+            logging.info(f"Sending request to LLM at {target_url} (SSL verify: {ssl_verify})")
+            
+            if not ssl_verify:
+                # Désactiver la vérification SSL pour les environnements d'entreprise
+                # ATTENTION : Ceci réduit la sécurité, à utiliser uniquement en environnement contrôlé
+                import urllib3
+                urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+                logging.warning("SSL certificate verification is disabled - use with caution!")
+            
+            response = requests.post(target_url, headers=headers, json=payload, stream=stream, verify=ssl_verify)
+            response.raise_for_status()
+            
+            if stream:
+                # Pour le streaming, on devrait traiter ligne par ligne
+                # mais pour simplifier, on retourne juste la réponse
+                return {'response': 'Streaming not fully implemented yet'}
+            else:
+                if llm_api_type == "openai":
+                    result = response.json()
+                    assistant_message = result['choices'][0]['message']['content']
+                else:  # ollama
+                    result = response.json()
+                    assistant_message = result.get('response', '')
+                
+                return {'response': assistant_message}
+                
+        except requests.exceptions.HTTPError as http_err:
+            error_msg = f"HTTP error: {http_err}"
+            try:
+                error_details = http_err.response.json()
+                error_msg += f" - Details: {error_details}"
+            except:
+                pass
+            logging.error(error_msg)
+            return {'error': error_msg}
+        except Exception as e:
+            error_msg = f"Erreur lors de la communication avec le LLM: {str(e)}"
+            logging.error(error_msg)
+            return {'error': error_msg}
 
 def run_flask():
     app.run(port=5000, debug=False)

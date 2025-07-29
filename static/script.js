@@ -1187,40 +1187,37 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (startLlmChatBtn) {
         startLlmChatBtn.addEventListener('click', async () => {
+            console.log("DEBUG: Clic sur startLlmChatBtn. window.pywebview existe?", !!window.pywebview);
+            
             if (window.pywebview) {
-                // Mode Bureau
-                console.log("Mode Bureau détecté. Appel de pywebview.api.launch_browser()");
-                window.pywebview.api.launch_browser();
+                // Mode Bureau - Ouvrir la nouvelle fenêtre Toolbox
+                console.log("Mode Bureau détecté. Appel de pywebview.api.open_toolbox_window()");
+                if (window.pywebview.api && window.pywebview.api.open_toolbox_window) {
+                    window.pywebview.api.open_toolbox_window();
+                } else {
+                    console.error("La fonction open_toolbox_window n'est pas disponible dans l'API");
+                }
+                // En mode Desktop, le bouton reste visible pour permettre de rouvrir la Toolbox
             } else {
-                // Mode Web
-                const initialContext = markdownOutput.value;
-                const customInstructions = instructionsTextarea.value;
-
-                if (!initialContext.trim()) {
-                    // Utiliser showError pour une meilleure intégration UI
-                    showError(llmErrorChat, "Le contexte Markdown est vide. Veuillez d'abord générer un contexte.", llmChatSpinner);
-                    // alert('Le contexte Markdown est vide. Veuillez d'abord générer un contexte.');
-                    return;
-                }
-
-                chatHistory = [];
-                chatDisplayArea.innerHTML = '';
-                hideError(llmErrorChat); // Cacher les erreurs précédentes
-
-                let firstUserMessageContent = "Voici le contexte du projet sur lequel je souhaite discuter:\n\n" + initialContext;
-                if (customInstructions.trim()) {
-                    firstUserMessageContent += "\n\nInstructions spécifiques pour cette discussion:\n" + customInstructions;
-                }
-
-                chatHistory.push({ role: 'user', content: firstUserMessageContent });
-                appendMessageToChat('user', "Contexte du projet et instructions initiales envoyés au LLM.");
-
-                chatUiContainer.classList.remove('visually-hidden');
-                startLlmChatBtn.classList.add('visually-hidden');
-
-                await sendChatHistoryToLlm();
+                // Mode Web - Cacher le bouton en mode Web car la fonctionnalité n'est pas disponible
+                console.log("Mode Web détecté. La Toolbox n'est disponible qu'en mode Desktop.");
+                alert("La Toolbox Développeur n'est disponible qu'en mode Desktop.");
             }
         });
+    }
+
+    // Fonction pour restaurer le bouton en mode Desktop si il a été caché par erreur
+    function ensureDesktopButtonVisibility() {
+        if (window.pywebview && startLlmChatBtn) {
+            // En mode Desktop, s'assurer que le bouton est toujours visible
+            startLlmChatBtn.classList.remove('visually-hidden');
+            console.log("DEBUG: Bouton startLlmChatBtn restauré en mode Desktop");
+        }
+    }
+
+    // Vérifier périodiquement en mode Desktop
+    if (window.pywebview) {
+        setInterval(ensureDesktopButtonVisibility, 2000);
     }
 
     if (sendChatMessageBtn && chatMessageInput) {
