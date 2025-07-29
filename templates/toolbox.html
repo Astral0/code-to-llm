@@ -62,19 +62,75 @@
         .message-bubble.user {
             background-color: #007bff;
             color: white;
-            margin-left: auto;
-            text-align: right;
+            margin-right: auto;
+            margin-left: 0;
+            text-align: left;
         }
         .message-bubble.assistant {
             background-color: #e9ecef;
             color: #333;
             margin-right: auto;
+            user-select: text;
+            -webkit-user-select: text;
+            -moz-user-select: text;
+            -ms-user-select: text;
+        }
+        .message-bubble .toggle-markdown-btn,
+        .message-bubble .copy-btn,
+        .message-bubble .edit-btn {
+            transition: opacity 0.2s;
+            background: rgba(255, 255, 255, 0.9);
+            border: 1px solid rgba(255, 255, 255, 0.5);
+            color: #333;
+        }
+        .message-bubble.user .toggle-markdown-btn,
+        .message-bubble.user .copy-btn,
+        .message-bubble.user .edit-btn {
+            background: rgba(255, 255, 255, 0.95);
+            border: 1px solid rgba(255, 255, 255, 0.8);
+            color: #007bff;
+        }
+        .message-bubble:hover .toggle-markdown-btn,
+        .message-bubble:hover .copy-btn,
+        .message-bubble:hover .edit-btn {
+            opacity: 1 !important;
+            background: white;
+        }
+        .message-content {
+            padding: 10px 10px 30px 10px; /* Espace pour les boutons en bas seulement */
+        }
+        .buttons-top {
+            position: absolute;
+            right: 5px;
+            top: 5px;
+            display: flex;
+            gap: 5px;
+        }
+        .buttons-bottom {
+            position: absolute;
+            right: 5px;
+            bottom: 5px;
+            display: flex;
+            gap: 5px;
+        }
+        .message-content pre {
+            background-color: #f5f5f5;
+            padding: 10px;
+            border-radius: 4px;
+            overflow-x: auto;
+        }
+        .message-content code {
+            background-color: #f5f5f5;
+            padding: 2px 4px;
+            border-radius: 3px;
+            font-size: 0.9em;
         }
         .message-bubble.system {
             background-color: #fff3cd;
             color: #856404;
-            margin: 0 auto;
-            text-align: center;
+            margin-right: auto;
+            margin-left: 0;
+            text-align: left;
             max-width: 90%;
         }
         .message-bubble.system-error {
