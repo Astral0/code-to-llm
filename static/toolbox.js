@@ -19,6 +19,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let activePrompts = new Set();
     let chatHistory = [];
     let isStreamEnabled = false;
+    let smartScrollController = null; // Contrôleur pour le défilement intelligent
     
     // Fonction pour activer/désactiver les boutons selon le contexte
     function updateButtonStates() {
@@ -53,6 +54,26 @@ document.addEventListener('DOMContentLoaded', () => {
     // Appeler la fonction au chargement
     checkStreamingStatus();
 
+    // Initialiser le défilement intelligent
+    if (chatDisplayArea && window.ChatUtils && window.ChatUtils.SmartScroll) {
+        smartScrollController = window.ChatUtils.SmartScroll.init(chatDisplayArea, {
+            tolerance: 50,
+            debug: true // Activer les logs pour le debug
+        });
+    } else {
+        console.warn('ChatUtils.SmartScroll non disponible ou chatDisplayArea non trouvé');
+    }
+
+    // Fonction wrapper pour la compatibilité
+    function autoScrollToBottom() {
+        if (smartScrollController) {
+            smartScrollController.scrollToBottom();
+        } else {
+            // Fallback si le module n'est pas chargé
+            chatDisplayArea.scrollTop = chatDisplayArea.scrollHeight;
+        }
+    }
+
     // Fonction pour afficher les erreurs
     function showError(element, message) {
         element.textContent = message;
@@ -73,7 +94,7 @@ document.addEventListener('DOMContentLoaded', () => {
             contentDiv.textContent = content;
             contentDiv.dataset.rawContent = content;
             contentDiv.dataset.markdownContent = marked.parse(content);
-            chatDisplayArea.scrollTop = chatDisplayArea.scrollHeight;
+            autoScrollToBottom();
             return existingDiv;
         }
 
@@ -672,6 +693,9 @@ document.addEventListener('DOMContentLoaded', () => {
         sendChatMessageBtn.disabled = true;
         chatMessageInput.disabled = true;
         llmChatSpinner.classList.remove('d-none');
+        if (smartScrollController) {
+            smartScrollController.reset(); // Réactiver le défilement automatique pour la nouvelle réponse
+        }
         
         console.log('isStreamEnabled avant envoi:', isStreamEnabled, typeof isStreamEnabled);
 
@@ -731,7 +755,7 @@ document.addEventListener('DOMContentLoaded', () => {
                                 } else {
                                     contentDiv.textContent = streamContent;
                                 }
-                                chatDisplayArea.scrollTop = chatDisplayArea.scrollHeight;
+                                autoScrollToBottom();
                             }
                         }
                     };
@@ -831,6 +855,9 @@ document.addEventListener('DOMContentLoaded', () => {
         if (confirm('Êtes-vous sûr de vouloir effacer la conversation ?')) {
             chatHistory = [];
             chatDisplayArea.innerHTML = '';
+            if (smartScrollController) {
+                smartScrollController.reset(); // Réinitialiser le défilement automatique
+            }
             appendMessageToChat('system', 'Conversation effacée. Le contexte du projet reste importé.');
             
             // Réinitialiser le compteur de tokens

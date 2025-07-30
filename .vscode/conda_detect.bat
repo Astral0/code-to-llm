@@ -6,8 +6,8 @@ if exist "C:\UTILS\miniconda3\Scripts\conda.exe" (
     goto :eof
 )
 
-if exist "C:\APPLIS\miniconda3"\Scripts\conda.exe" (
-    call "C:\APPLIS\miniconda3"\Scripts\activate.bat" "C:\UTILS\miniconda3" && conda activate code2llm
+if exist "C:\APPLIS\miniconda3\Scripts\conda.exe" (
+    call "C:\APPLIS\miniconda3\Scripts\activate.bat" "C:\APPLIS\miniconda3" && conda activate code2llm
     goto :eof
 )
 
