@@ -1,0 +1,10 @@
+{
+    "python.terminal.activateEnvironment": false,
+    "terminal.integrated.profiles.windows": {
+        "Code2LLM": {
+            "path": "cmd.exe",
+            "args": ["/k", "call .vscode\\conda_detect.bat"]
+        }
+    },
+    "terminal.integrated.defaultProfile.windows": "Code2LLM"
+}

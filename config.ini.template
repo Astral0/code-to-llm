@@ -48,7 +48,7 @@ executable_path =
 
 [BinaryDetection]
 # Fichiers immédiatement rejetés (séparés par des virgules)
-extension_blacklist = .png, .jpg, .jpeg, .gif, .bmp, .ico, .exe, .dll, .so, .pdf, .zip, .gz, .rar, .mp3, .mp4, .avi, .mov, .woff, .woff2, .eot, .ttf, .otf, .class, .jar, .pyc, .bin, .dat, .dmg, .iso, .msi
+extension_blacklist = .png, .jpg, .jpeg, .gif, .bmp, .ico, .exe, .dll, .so, .pdf, .zip, .gz, .rar, .mp3, .mp4, .avi, .mov, .woff, .woff2, .eot, .ttf, .otf, .class, .jar, .pyc, .bin, .dat, .dmg, .iso, .msi, , .cjs
 
 # Fichiers immédiatement acceptés sans analyse de contenu (séparés par des virgules)
 extension_whitelist = .py, .js, .html, .css, .json, .md, .txt, .sh, .yml, .yaml, .xml, .ini, .cfg, .conf, .rst, .ts, .jsx, .tsx, .toml, .sql
