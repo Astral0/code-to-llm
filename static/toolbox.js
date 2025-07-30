@@ -12,6 +12,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const clearChatBtn = document.getElementById('clearChatBtn');
     const llmErrorChat = document.getElementById('llm-error-chat');
     const llmChatSpinner = document.getElementById('llm-chat-spinner');
+    const tokenCountSpan = document.getElementById('chat-token-count');
 
     // État de l'application
     let mainContext = '';
@@ -385,10 +386,16 @@ document.addEventListener('DOMContentLoaded', () => {
                         }
                     };
                     
-                    window.onStreamEnd = (id) => {
+                    window.onStreamEnd = (id, total_tokens) => {
                         if (id === callbackId) {
                             // Ajouter à l'historique
                             chatHistory.push({ role: 'assistant', content: streamContent });
+                            
+                            // Mettre à jour le compteur de tokens
+                            if (total_tokens && tokenCountSpan) {
+                                tokenCountSpan.textContent = total_tokens.toLocaleString();
+                            }
+                            
                             // Nettoyage
                             delete window.onStreamStart;
                             delete window.onStreamChunk;
@@ -426,6 +433,11 @@ document.addEventListener('DOMContentLoaded', () => {
                     } else if (response.response) {
                         chatHistory.push({ role: 'assistant', content: response.response });
                         appendMessageToChat('assistant', response.response, null, chatHistory.length - 1);
+                        
+                        // Mettre à jour le compteur de tokens
+                        if (response.total_tokens && tokenCountSpan) {
+                            tokenCountSpan.textContent = response.total_tokens.toLocaleString();
+                        }
                     }
                 }
             } else {
@@ -724,11 +736,17 @@ document.addEventListener('DOMContentLoaded', () => {
                         }
                     };
                     
-                    window.onStreamEnd = (id) => {
-                        console.log('Stream end:', id);
+                    window.onStreamEnd = (id, total_tokens) => {
+                        console.log('Stream end:', id, 'tokens:', total_tokens);
                         if (id === callbackId) {
                             // Ajouter à l'historique
                             chatHistory.push({ role: 'assistant', content: streamContent });
+                            
+                            // Mettre à jour le compteur de tokens
+                            if (total_tokens && tokenCountSpan) {
+                                tokenCountSpan.textContent = total_tokens.toLocaleString();
+                            }
+                            
                             // Nettoyage
                             delete window.onStreamStart;
                             delete window.onStreamChunk;
@@ -775,6 +793,11 @@ document.addEventListener('DOMContentLoaded', () => {
                     } else if (response.response) {
                         chatHistory.push({ role: 'assistant', content: response.response });
                         appendMessageToChat('assistant', response.response, null, chatHistory.length - 1);
+                        
+                        // Mettre à jour le compteur de tokens
+                        if (response.total_tokens && tokenCountSpan) {
+                            tokenCountSpan.textContent = response.total_tokens.toLocaleString();
+                        }
                     }
                 }
             } else {
@@ -809,6 +832,11 @@ document.addEventListener('DOMContentLoaded', () => {
             chatHistory = [];
             chatDisplayArea.innerHTML = '';
             appendMessageToChat('system', 'Conversation effacée. Le contexte du projet reste importé.');
+            
+            // Réinitialiser le compteur de tokens
+            if (tokenCountSpan) {
+                tokenCountSpan.textContent = '0';
+            }
         }
     });
 

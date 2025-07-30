@@ -218,6 +218,12 @@
                     <div class="chat-input-area">
                         <div id="llm-error-chat" class="alert alert-danger p-2 d-none mb-3" role="alert" style="font-size: 0.9em;"></div>
                         
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <div id="chat-info-bar" class="text-muted small">
+                                Tokens de la conversation : <span id="chat-token-count" class="fw-bold">0</span>
+                            </div>
+                        </div>
+                        
                         <div class="input-group">
                             <textarea id="chatMessageInput" class="form-control" placeholder="Tapez votre message ou sélectionnez un prompt..." rows="2"></textarea>
                             <button id="sendChatMessageBtn" class="btn btn-primary" title="Envoyer le message">

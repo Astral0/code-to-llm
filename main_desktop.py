@@ -6,6 +6,7 @@ import json
 import appdirs
 import configparser
 import logging
+import re
 from selenium.webdriver.common.by import By
 from pywebview_driver import PywebviewDriver
 from web_server import app
@@ -699,6 +700,83 @@ class Api:
         except:
             return False
     
+    def _count_tokens_for_history(self, chat_history):
+        """Compte le nombre total de tokens dans l'historique du chat"""
+        try:
+            # Utiliser une approximation locale sans dépendance externe
+            # Basée sur les observations de tokenization GPT/Claude
+            total_tokens = 0
+            
+            for message in chat_history:
+                content = message.get('content', '')
+                role = message.get('role', '')
+                
+                # Compter les tokens du contenu
+                content_tokens = self._estimate_tokens(content)
+                
+                # Ajouter le surcoût pour le rôle et la structure
+                # Format typique: {"role": "user", "content": "..."} = ~5-7 tokens de structure
+                role_tokens = len(role.split()) + 5
+                
+                total_tokens += content_tokens + role_tokens
+            
+            # Ajouter un surcoût pour la structure globale de la conversation
+            total_tokens += 3
+            
+            logging.debug(f"Tokens estimés: {total_tokens} pour {len(chat_history)} messages")
+            return total_tokens
+            
+        except Exception as e:
+            logging.error(f"Erreur lors du comptage des tokens: {e}")
+            # En cas d'erreur, retourner une estimation très basique
+            total_chars = sum(len(msg.get('content', '')) for msg in chat_history)
+            return total_chars // 4
+    
+    def _estimate_tokens(self, text):
+        """Estime le nombre de tokens dans un texte donné"""
+        if not text:
+            return 0
+        
+        # Approximation basée sur l'analyse des patterns de tokenization GPT/Claude
+        # 1. Compter les mots (séparés par espaces)
+        words = text.split()
+        word_count = len(words)
+        
+        # 2. Compter les caractères de ponctuation qui deviennent souvent des tokens séparés
+        punctuation_count = len(re.findall(r'[.,!?;:()\[\]{}"\'`\-–—…]', text))
+        
+        # 3. Compter les nombres (souvent tokenizés différemment)
+        number_sequences = re.findall(r'\d+', text)
+        number_tokens = sum(len(num) // 3 + 1 for num in number_sequences)
+        
+        # 4. Compter les retours à la ligne (souvent des tokens séparés)
+        newline_count = text.count('\n')
+        
+        # 5. Gérer les mots longs (souvent divisés en sous-tokens)
+        long_words = [w for w in words if len(w) > 10]
+        extra_tokens_from_long_words = sum(len(w) // 8 for w in long_words)
+        
+        # 6. Gérer le code (variables, syntaxe)
+        # Détecter si c'est du code par la présence de patterns communs
+        code_indicators = ['def ', 'function ', 'import ', 'const ', 'let ', 'var ', '{}', '()', '[]', '=>', '//']
+        is_code = any(indicator in text for indicator in code_indicators)
+        code_multiplier = 1.3 if is_code else 1.0
+        
+        # Calcul final avec pondération
+        # Base: 1 token par mot, ajusté selon les observations
+        base_tokens = word_count * 1.1  # Les mots courts font souvent 1 token, les longs plus
+        
+        total_tokens = int((
+            base_tokens + 
+            punctuation_count * 0.8 +  # Pas toute la ponctuation devient un token séparé
+            number_tokens +
+            newline_count +
+            extra_tokens_from_long_words
+        ) * code_multiplier)
+        
+        # Minimum de tokens (même une chaîne vide prend au moins 1 token)
+        return max(1, total_tokens)
+    
     def send_to_llm_stream(self, chat_history, callback_id):
         """Envoie l'historique au LLM en mode streaming avec callback vers le frontend"""
         logging.info(f"send_to_llm_stream appelé avec callback_id: {callback_id}")
@@ -802,13 +880,17 @@ class Api:
                         except json.JSONDecodeError:
                             continue
             
-            # Envoyer la fin du streaming
-            logging.info(f"Streaming terminé, {chunk_count} chunks envoyés, taille totale: {len(full_response)}")
-            if self._toolbox_window:
-                logging.info(f"Envoi de onStreamEnd pour {callback_id}")
-                self._toolbox_window.evaluate_js(f'window.onStreamEnd && window.onStreamEnd("{callback_id}")')
+            # Créer l'historique final et compter les tokens
+            final_history = chat_history + [{'role': 'assistant', 'content': full_response}]
+            total_tokens = self._count_tokens_for_history(final_history)
             
-            return {'response': full_response}
+            # Envoyer la fin du streaming avec le comptage de tokens
+            logging.info(f"Streaming terminé, {chunk_count} chunks envoyés, taille totale: {len(full_response)}, tokens: {total_tokens}")
+            if self._toolbox_window:
+                logging.info(f"Envoi de onStreamEnd pour {callback_id} avec {total_tokens} tokens")
+                self._toolbox_window.evaluate_js(f'window.onStreamEnd && window.onStreamEnd("{callback_id}", {total_tokens})')
+            
+            return {'response': full_response, 'total_tokens': total_tokens}
             
         except Exception as e:
             error_msg = f"Erreur lors du streaming: {str(e)}"
@@ -909,7 +991,11 @@ class Api:
                                 except json.JSONDecodeError:
                                     continue
                     
-                    return {'response': full_response}
+                    # Créer l'historique final et compter les tokens
+                    final_history = chat_history + [{'role': 'assistant', 'content': full_response}]
+                    total_tokens = self._count_tokens_for_history(final_history)
+                    
+                    return {'response': full_response, 'total_tokens': total_tokens}
                 except Exception as e:
                     logging.error(f"Erreur lors du streaming: {e}")
                     return {'error': f"Erreur lors du streaming: {str(e)}"}
@@ -921,7 +1007,11 @@ class Api:
                     result = response.json()
                     assistant_message = result.get('response', '')
                 
-                return {'response': assistant_message}
+                # Créer l'historique final et compter les tokens
+                final_history = chat_history + [{'role': 'assistant', 'content': assistant_message}]
+                total_tokens = self._count_tokens_for_history(final_history)
+                
+                return {'response': assistant_message, 'total_tokens': total_tokens}
                 
         except requests.exceptions.HTTPError as http_err:
             error_msg = f"HTTP error: {http_err}"
