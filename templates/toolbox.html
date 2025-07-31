@@ -120,12 +120,36 @@
             padding: 10px;
             border-radius: 4px;
             overflow-x: auto;
+            position: relative;
         }
         .message-content code {
             background-color: #f5f5f5;
             padding: 2px 4px;
             border-radius: 3px;
             font-size: 0.9em;
+        }
+        /* Style pour le bouton de copie dans les blocs de code */
+        .code-copy-btn {
+            position: absolute;
+            top: 5px;
+            right: 5px;
+            padding: 4px 8px;
+            font-size: 12px;
+            background: rgba(255, 255, 255, 0.9);
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            cursor: pointer;
+            opacity: 0.7;
+            transition: opacity 0.2s, background 0.2s;
+        }
+        .code-copy-btn:hover {
+            opacity: 1;
+            background: white;
+        }
+        .code-copy-btn.copied {
+            background: #d4edda;
+            border-color: #c3e6cb;
+            color: #155724;
         }
         .message-bubble.system {
             background-color: #fff3cd;

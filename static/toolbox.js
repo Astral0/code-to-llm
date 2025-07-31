@@ -181,6 +181,10 @@ document.addEventListener('DOMContentLoaded', () => {
                             btn.innerHTML = '<i class="fas fa-align-left"></i>';
                             btn.title = 'Afficher en texte brut';
                         });
+                        // Ré-ajouter les boutons de copie après le changement en markdown
+                        if (messageDiv.closest('.chat-assistant')) {
+                            addCodeCopyButtons(contentDiv);
+                        }
                     }
                 });
                 
@@ -240,7 +244,67 @@ document.addEventListener('DOMContentLoaded', () => {
         messageWrapper.appendChild(messageDiv);
         chatDisplayArea.appendChild(messageWrapper);
         chatDisplayArea.scrollTop = chatDisplayArea.scrollHeight;
+        
+        // Ajouter les boutons de copie aux blocs de code si c'est un message assistant
+        if (role === 'assistant') {
+            addCodeCopyButtons(contentDiv);
+        }
+        
         return messageDiv;
+    }
+
+    // Fonction pour ajouter des boutons de copie à tous les blocs de code
+    function addCodeCopyButtons(container) {
+        // Trouver tous les éléments <pre> qui contiennent des blocs de code
+        const codeBlocks = container.querySelectorAll('pre');
+        
+        codeBlocks.forEach((preElement, index) => {
+            // Vérifier si un bouton n'a pas déjà été ajouté
+            if (preElement.querySelector('.code-copy-btn')) {
+                return;
+            }
+            
+            // S'assurer que le pre a la position relative
+            if (!preElement.style.position || preElement.style.position === 'static') {
+                preElement.style.position = 'relative';
+            }
+            
+            // Créer le bouton de copie
+            const copyBtn = document.createElement('button');
+            copyBtn.className = 'code-copy-btn';
+            copyBtn.innerHTML = '<i class="far fa-copy"></i> Copier';
+            copyBtn.title = 'Copier le code';
+            
+            // Gestionnaire de clic
+            copyBtn.addEventListener('click', async () => {
+                // Récupérer le texte du code
+                const codeElement = preElement.querySelector('code') || preElement;
+                const codeText = codeElement.textContent || codeElement.innerText;
+                
+                try {
+                    await navigator.clipboard.writeText(codeText);
+                    
+                    // Feedback visuel
+                    copyBtn.innerHTML = '<i class="fas fa-check"></i> Copié !';
+                    copyBtn.classList.add('copied');
+                    
+                    // Restaurer après 2 secondes
+                    setTimeout(() => {
+                        copyBtn.innerHTML = '<i class="far fa-copy"></i> Copier';
+                        copyBtn.classList.remove('copied');
+                    }, 2000);
+                } catch (err) {
+                    console.error('Erreur lors de la copie:', err);
+                    copyBtn.innerHTML = '<i class="fas fa-times"></i> Erreur';
+                    setTimeout(() => {
+                        copyBtn.innerHTML = '<i class="far fa-copy"></i> Copier';
+                    }, 2000);
+                }
+            });
+            
+            // Ajouter le bouton au bloc de code
+            preElement.appendChild(copyBtn);
+        });
     }
 
     // Fonction pour éditer un message utilisateur
@@ -768,6 +832,8 @@ Le contexte contient le code source et la structure du projet pour permettre l'a
                                 contentDiv.dataset.markdownContent = marked.parse(streamContent);
                                 if (contentDiv.dataset.isMarkdown === 'true') {
                                     contentDiv.innerHTML = contentDiv.dataset.markdownContent;
+                                    // Ajouter les boutons de copie pendant le streaming
+                                    addCodeCopyButtons(contentDiv);
                                 } else {
                                     contentDiv.textContent = streamContent;
                                 }
