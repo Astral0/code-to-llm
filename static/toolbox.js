@@ -10,6 +10,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const chatMessageInput = document.getElementById('chatMessageInput');
     const sendChatMessageBtn = document.getElementById('sendChatMessageBtn');
     const clearChatBtn = document.getElementById('clearChatBtn');
+    const exportChatBtn = document.getElementById('exportChatBtn');
     const llmErrorChat = document.getElementById('llm-error-chat');
     const llmChatSpinner = document.getElementById('llm-chat-spinner');
     const tokenCountSpan = document.getElementById('chat-token-count');
@@ -20,6 +21,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let chatHistory = [];
     let isStreamEnabled = false;
     let smartScrollController = null; // Contrôleur pour le défilement intelligent
+    let conversationSummary = ''; // Stocke le résumé formaté du contexte
     
     // Fonction pour activer/désactiver les boutons selon le contexte
     function updateButtonStates() {
@@ -598,8 +600,22 @@ document.addEventListener('DOMContentLoaded', () => {
                     const contextLines = mainContext.split('\n').length;
                     const contextPreview = mainContext.substring(0, 200) + '...';
                     
-                    // Ajouter un message système dans le chat avec des détails
-                    appendMessageToChat('system', `Le contexte du projet a été importé avec succès !\n\n**Statistiques :**\n- Taille : ${contextLength.toLocaleString()} caractères\n- Lignes : ${contextLines.toLocaleString()}\n\n**Aperçu :**\n\`\`\`\n${contextPreview}\n\`\`\`\n\nLe contexte est maintenant disponible pour l'analyse. Vous pouvez utiliser les prompts ou poser vos questions.`);
+                    // Créer et stocker le résumé formaté
+                    conversationSummary = `## Contexte du Projet
+
+**Statistiques :**
+- Taille : ${contextLength.toLocaleString()} caractères
+- Lignes : ${contextLines.toLocaleString()}
+
+**Aperçu :**
+\`\`\`
+${contextPreview}
+\`\`\`
+
+Le contexte contient le code source et la structure du projet pour permettre l'analyse et les modifications.`;
+                    
+                    // Ajouter un message système dans le chat
+                    appendMessageToChat('system', `Le contexte du projet a été importé avec succès !\n\n${conversationSummary}\n\nLe contexte est maintenant disponible pour l'analyse. Vous pouvez utiliser les prompts ou poser vos questions.`);
                     
                     // Activer les boutons maintenant que le contexte est chargé
                     updateButtonStates();
@@ -871,6 +887,63 @@ document.addEventListener('DOMContentLoaded', () => {
     loadAvailablePrompts();
     adjustTextareaHeight(chatMessageInput);
     updateButtonStates(); // Désactiver les boutons au démarrage
+    
+    // Gestionnaire pour le bouton d'export
+    if (exportChatBtn) {
+        exportChatBtn.addEventListener('click', async () => {
+            // Désactiver le bouton pendant l'export
+            exportChatBtn.disabled = true;
+            const originalContent = exportChatBtn.innerHTML;
+            exportChatBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Export en cours...';
+            
+            try {
+                // Préparer les données de la conversation
+                const chatData = {
+                    summary: conversationSummary,
+                    history: chatHistory
+                };
+                
+                // Appeler l'API pour ouvrir la boîte de dialogue et exporter
+                if (window.pywebview && window.pywebview.api) {
+                    const result = await window.pywebview.api.save_conversation_dialog(chatData);
+                    
+                    if (result.success) {
+                        // Afficher une notification de succès
+                        const successMessage = `Conversation exportée avec succès !\nFichier : ${result.path.split(/[\\/]/).pop()}`;
+                        appendMessageToChat('system', successMessage);
+                        
+                        // Feedback visuel temporaire
+                        exportChatBtn.classList.remove('btn-outline-success');
+                        exportChatBtn.classList.add('btn-success');
+                        exportChatBtn.innerHTML = '<i class="fas fa-check"></i> Exporté !';
+                        
+                        setTimeout(() => {
+                            exportChatBtn.classList.remove('btn-success');
+                            exportChatBtn.classList.add('btn-outline-success');
+                            exportChatBtn.innerHTML = originalContent;
+                        }, 2000);
+                    } else if (result.cancelled) {
+                        // L'utilisateur a annulé - ne rien faire
+                        exportChatBtn.innerHTML = originalContent;
+                    } else {
+                        // Erreur
+                        showError(llmErrorChat, `Erreur lors de l'export : ${result.error || 'Erreur inconnue'}`);
+                        exportChatBtn.innerHTML = originalContent;
+                    }
+                } else {
+                    showError(llmErrorChat, 'API non disponible pour l\'export');
+                    exportChatBtn.innerHTML = originalContent;
+                }
+            } catch (error) {
+                console.error('Erreur lors de l\'export:', error);
+                showError(llmErrorChat, `Erreur lors de l'export : ${error.message}`);
+                exportChatBtn.innerHTML = originalContent;
+            } finally {
+                // Réactiver le bouton
+                exportChatBtn.disabled = false;
+            }
+        });
+    }
     
     // Réessayer après un délai si l'API n'était pas prête
     setTimeout(() => {

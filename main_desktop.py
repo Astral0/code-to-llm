@@ -13,6 +13,7 @@ from web_server import app
 import pathspec
 from pathspec.patterns import GitWildMatchPattern
 from pathlib import Path
+from services.export_service import ExportService
 
 # Définir le chemin de stockage des données persistantes
 DATA_DIR = appdirs.user_data_dir('WebAutomationDesktop', 'WebAutomationTools')
@@ -57,6 +58,7 @@ class Api:
         self.driver = None
         self.current_directory = None
         self.file_cache = []
+        self.export_service = ExportService()
     
     def set_main_window(self, window):
         """Définit la référence à la fenêtre principale"""
@@ -1042,6 +1044,58 @@ class Api:
             error_msg = f"Erreur lors de la communication avec le LLM: {str(e)}"
             logging.error(error_msg)
             return {'error': error_msg}
+
+    def save_conversation_dialog(self, chat_data):
+        """Ouvre une boîte de dialogue pour sauvegarder la conversation"""
+        if not self._toolbox_window:
+            error_msg = 'Fenêtre Toolbox non disponible'
+            logging.error(error_msg)
+            return {'success': False, 'error': error_msg}
+        
+        try:
+            # Configurer les types de fichiers
+            file_types = (
+                'Fichiers Markdown (*.md)',
+                'Documents Word (*.docx)', 
+                'Fichiers PDF (*.pdf)',
+                'Tous les fichiers (*.*)'
+            )
+            
+            # Ouvrir la boîte de dialogue de sauvegarde
+            file_path = self._toolbox_window.create_file_dialog(
+                webview.SAVE_DIALOG,
+                allow_multiple=False,
+                file_types=file_types
+            )
+            
+            # Si l'utilisateur annule
+            if not file_path:
+                return {'success': False, 'cancelled': True}
+            
+            # S'assurer que le fichier a une extension valide
+            path = Path(file_path)
+            if path.suffix.lower() not in ['.md', '.docx', '.pdf']:
+                # Ajouter l'extension .md par défaut
+                file_path = str(path.with_suffix('.md'))
+            
+            # Appeler le service d'export
+            result = self.export_service.generate_export(chat_data, file_path)
+            
+            if result['success']:
+                logging.info(f"Conversation exportée avec succès: {file_path}")
+                return {
+                    'success': True,
+                    'path': file_path,
+                    'size': result.get('size', 0)
+                }
+            else:
+                logging.error(f"Erreur lors de l'export: {result.get('error', 'Erreur inconnue')}")
+                return result
+                
+        except Exception as e:
+            error_msg = f"Erreur lors de l'export de la conversation: {str(e)}"
+            logging.error(error_msg)
+            return {'success': False, 'error': error_msg}
 
 def run_flask():
     app.run(port=5000, debug=False)
