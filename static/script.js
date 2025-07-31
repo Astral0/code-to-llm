@@ -742,6 +742,24 @@ document.addEventListener('DOMContentLoaded', () => {
         return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ");
     }
 
+    /**
+     * Converts bytes into human-readable format
+     * @param {number} bytes - The number of bytes to format
+     * @param {number} decimals - Number of decimal places (default: 2)
+     * @returns {string} Formatted string (e.g., "1.5 Mo", "150 Ko")
+     * @example
+     * formatBytes(1536) // returns "1.5 Ko"
+     * formatBytes(1048576) // returns "1 Mo"
+     */
+    function formatBytes(bytes, decimals = 2) {
+        if (bytes === 0) return '0 Bytes';
+        const k = 1024;
+        const dm = decimals < 0 ? 0 : decimals;
+        const sizes = ['Bytes', 'Ko', 'Mo', 'Go', 'To'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
+    }
+
     function displaySummary(summary) {
         const summaryContainer = document.getElementById('summaryContainer');
         if (!summaryContainer) return;
@@ -778,6 +796,40 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
         summaryContainer.appendChild(list);
+    }
+
+    /**
+     * Displays the list of largest files in a collapsible section
+     * @param {Array<{path: string, size: number}>} files - Array of file objects with path and size
+     * @example
+     * displayLargeFiles([
+     *   {path: 'src/main.js', size: 150000},
+     *   {path: 'data/dataset.json', size: 2500000}
+     * ])
+     */
+    function displayLargeFiles(files) {
+        const container = document.getElementById('largeFilesContainer');
+        const list = document.getElementById('largeFilesList');
+
+        if (!container || !list) return;
+
+        if (!files || files.length === 0) {
+            container.classList.add('d-none');
+            return;
+        }
+
+        list.innerHTML = ''; // Vider la liste précédente
+        files.forEach(file => {
+            const li = document.createElement('li');
+            li.className = 'list-group-item d-flex justify-content-between align-items-center p-1';
+            li.innerHTML = `
+                <span><i class="far fa-file-code text-muted"></i> ${file.path}</span>
+                <span class="badge bg-secondary rounded-pill">${formatBytes(file.size)}</span>
+            `;
+            list.appendChild(li);
+        });
+
+        container.classList.remove('d-none');
     }
 
     function displaySecretsAlert(secrets_masked_count, files_with_secrets) {
@@ -909,8 +961,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         if (finalResult.status === 'complete' && finalResult.result && finalResult.result.summary) {
                             const { markdown, summary } = finalResult.result;
                             markdownOutput.value = markdown;
-                            displaySummary(summary);
-                            displaySecretsAlert(summary.secrets_masked, summary.files_with_secrets);
+                            updateSummaryPanel(summary);
                             showElement(resultAndChatArea);
                             const llmInteractionContainer = document.getElementById('llmInteractionContainer');
                             if (llmInteractionContainer) showElement(llmInteractionContainer);
@@ -975,18 +1026,35 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    /**
+     * Updates all summary panels (stats, large files, secrets) based on the provided stats object
+     * @param {Object} stats - Statistics object containing summary data, largest files, and secrets info
+     */
+    function updateSummaryPanel(stats) {
+        if (!stats) {
+            // Hide all summary containers if no stats provided
+            hideElement(document.getElementById('summaryContainer'));
+            hideElement(document.getElementById('largeFilesContainer'));
+            hideElement(document.getElementById('secretsMaskedAlert'));
+            return;
+        }
+        
+        // Display each section with its respective data
+        displaySummary(stats);
+        displayLargeFiles(stats.largest_files);
+        displaySecretsAlert(stats.secrets_masked, stats.files_with_secrets);
+    }
+
     // --- Fonction d'affichage des résultats ---
     function displayResults(contextContent, stats) {
         const markdownOutput = document.getElementById('markdownOutput');
-        const summaryContainer = document.getElementById('summaryContainer');
         
         if (markdownOutput) {
             markdownOutput.textContent = contextContent;
         }
         
-        if (summaryContainer && stats) {
-            displaySummary(stats);
-        }
+        // Update all summary panels
+        updateSummaryPanel(stats);
         
         // Mettre à jour les boutons
         hideElement(generateBtn);

@@ -490,15 +490,26 @@ class Api:
             context_parts.extend(tree_lines)
             context_parts.append("")
             
-            # Ajouter le contenu de chaque fichier
+            # Ajouter le contenu de chaque fichier et stocker les infos de taille
+            file_contents = []
             for file_path in selected_files:
                 file_result = self.get_file_content(file_path)
                 if file_result['success']:
+                    content = file_result['content']
+                    size = len(content)
+                    
+                    # Stocker pour le tri par taille
+                    file_contents.append({
+                        'path': file_path,
+                        'content': content,
+                        'size': size
+                    })
+                    
                     context_parts.append(f"--- {file_path} ---")
-                    context_parts.append(file_result['content'])
+                    context_parts.append(content)
                     context_parts.append(f"--- FIN {file_path} ---")
                     context_parts.append("")
-                    total_chars += len(file_result['content'])
+                    total_chars += size
                     successful_files += 1
                 else:
                     logging.warning(f"Échec lecture fichier: {file_path}")
@@ -514,13 +525,18 @@ class Api:
             # Stocker le contexte pour la Toolbox
             self._last_generated_context = context
             
+            # Trier les fichiers par taille et prendre les 10 plus gros
+            largest_files = sorted(file_contents, key=lambda f: f['size'], reverse=True)[:10]
+            formatted_largest_files = [{'path': f['path'], 'size': f['size']} for f in largest_files]
+            
             return {
                 'success': True,
                 'context': context,
                 'stats': {
                     'total_files': successful_files,
                     'total_chars': total_chars,
-                    'estimated_tokens': total_chars // 4  # Estimation approximative
+                    'estimated_tokens': total_chars // 4,  # Estimation approximative
+                    'largest_files': formatted_largest_files  # NOUVELLE DONNÉE
                 }
             }
             

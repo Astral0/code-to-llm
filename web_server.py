@@ -573,6 +573,13 @@ def build_uploaded_context_string(uploaded_files, root_name="Uploaded_Directory"
     char_count_val, estimated_tokens_val = estimate_tokens(full_context)
     model_compatibility_val = get_model_compatibility(estimated_tokens_val)
     
+    # Calculer la taille de chaque fichier et les trier
+    files_with_size = [
+        {'path': f['path'], 'size': len(f['content'])}
+        for f in uploaded_files
+    ]
+    largest_files = sorted(files_with_size, key=lambda f: f['size'], reverse=True)[:10]
+    
     summary = {
         "total_files": len(analysis_cache.get("uploaded_files", [])),
         "included_files_count": len(uploaded_files),
@@ -582,7 +589,8 @@ def build_uploaded_context_string(uploaded_files, root_name="Uploaded_Directory"
         "estimated_tokens": int(estimated_tokens_val),
         "model_compatibility": model_compatibility_val,
         "secrets_masked": total_secrets_masked,
-        "files_with_secrets": files_with_secrets_list
+        "files_with_secrets": files_with_secrets_list,
+        "largest_files": largest_files  # NOUVELLE DONNÉE
     }
     
     return full_context, summary
