@@ -623,6 +623,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
             // Propagate change upwards to parents
             updateParentCheckboxes(checkbox);
+            
+            // Synchroniser avec la liste des fichiers volumineux
+            if (parentLi && parentLi.classList.contains('file')) {
+                const largeFileCheckbox = document.querySelector(`#largeFilesList input[data-file-path="${checkbox.value}"]`);
+                if (largeFileCheckbox) {
+                    largeFileCheckbox.checked = isChecked;
+                }
+            }
         }
     });
 
@@ -799,6 +807,62 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     /**
+     * Synchronise l'état d'une checkbox dans la liste des fichiers volumineux avec Step 2
+     * @param {string} filePath - Le chemin du fichier
+     * @param {boolean} isChecked - L'état de la checkbox
+     */
+    function syncFileCheckbox(filePath, isChecked) {
+        // Trouver la checkbox correspondante dans Step 2
+        const checkbox = fileListDiv.querySelector(`input[value="${filePath}"]`);
+        if (checkbox) {
+            // Désactiver temporairement la propagation d'événements
+            const originalScrollTop = document.documentElement.scrollTop || document.body.scrollTop;
+            
+            // Modifier la checkbox sans déclencher de focus
+            const previousActiveElement = document.activeElement;
+            checkbox.checked = isChecked;
+            
+            // Mettre à jour les checkboxes des dossiers parents sans déclencher de scroll
+            const tempFunc = Element.prototype.scrollIntoView;
+            Element.prototype.scrollIntoView = function() {}; // Désactiver temporairement scrollIntoView
+            
+            updateParentCheckboxes(checkbox);
+            
+            // Restaurer scrollIntoView
+            Element.prototype.scrollIntoView = tempFunc;
+            
+            // Restaurer le focus précédent
+            if (previousActiveElement && previousActiveElement !== checkbox) {
+                previousActiveElement.focus({ preventScroll: true });
+            }
+            
+            // Forcer le retour à la position originale
+            document.documentElement.scrollTop = originalScrollTop;
+            document.body.scrollTop = originalScrollTop;
+            
+            // Si le fichier est décoché, afficher un message et réactiver le bouton Generate
+            if (!isChecked) {
+                // Réafficher le bouton Generate et cacher Regenerate
+                showElement(generateBtn);
+                hideElement(regenerateBtn);
+                
+                // Effacer le contenu généré précédent
+                const markdownOutput = document.getElementById('markdownOutput');
+                if (markdownOutput) {
+                    markdownOutput.textContent = '';
+                }
+                
+                // Effacer uniquement le résumé et l'alerte des secrets, pas la liste des fichiers volumineux
+                const summaryContainer = document.getElementById('summaryContainer');
+                if (summaryContainer) {
+                    summaryContainer.innerHTML = '';
+                }
+                hideElement(document.getElementById('secretsMaskedAlert'));
+            }
+        }
+    }
+
+    /**
      * Displays the list of largest files in a collapsible section
      * @param {Array<{path: string, size: number}>} files - Array of file objects with path and size
      * @example
@@ -822,10 +886,37 @@ document.addEventListener('DOMContentLoaded', () => {
         files.forEach(file => {
             const li = document.createElement('li');
             li.className = 'list-group-item d-flex justify-content-between align-items-center p-1';
-            li.innerHTML = `
-                <span><i class="far fa-file-code text-muted"></i> ${file.path}</span>
-                <span class="badge bg-secondary rounded-pill">${formatBytes(file.size)}</span>
-            `;
+            
+            const leftDiv = document.createElement('div');
+            leftDiv.className = 'd-flex align-items-center';
+            
+            // Créer une checkbox pour ce fichier
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.className = 'form-check-input me-2';
+            
+            // Vérifier l'état actuel de la checkbox dans Step 2
+            const step2Checkbox = fileListDiv.querySelector(`input[value="${file.path}"]`);
+            checkbox.checked = step2Checkbox ? step2Checkbox.checked : true;
+            checkbox.dataset.filePath = file.path;
+            
+            // Ajouter un événement pour synchroniser avec Step 2
+            checkbox.addEventListener('change', function() {
+                syncFileCheckbox(file.path, this.checked);
+            });
+            
+            const fileSpan = document.createElement('span');
+            fileSpan.innerHTML = `<i class="far fa-file-code text-muted"></i> ${file.path}`;
+            
+            leftDiv.appendChild(checkbox);
+            leftDiv.appendChild(fileSpan);
+            
+            const sizeSpan = document.createElement('span');
+            sizeSpan.className = 'badge bg-secondary rounded-pill';
+            sizeSpan.textContent = formatBytes(file.size);
+            
+            li.appendChild(leftDiv);
+            li.appendChild(sizeSpan);
             list.appendChild(li);
         });
 

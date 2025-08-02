@@ -56,7 +56,7 @@ extension_whitelist = .py, .js, .html, .css, .json, .md, .txt, .sh, .yml, .yaml,
 [FileExclusion]
 # Fichiers spécifiques à exclure (séparés par des virgules)
 # Ces fichiers sont utiles dans Git mais pas pour le contexte LLM
-file_blacklist = .pnp.cjs, package-lock.json, yarn.lock, .DS_Store, Thumbs.db
+file_blacklist = .pnp.cjs, .pnp.loader.mjs, package-lock.json, yarn.lock, .DS_Store, Thumbs.db
 
 # Patterns à exclure (supporte * et ?)
 # Exemples: *.min.js, *-lock.json, test-*.js
