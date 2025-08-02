@@ -16,6 +16,7 @@ import concurrent.futures
 import threading
 import uuid
 import time
+import fnmatch
 
 TEXTCHARS = bytearray({7, 8, 9, 10, 12, 13, 27} | set(range(0x20, 0x100)) - {0x7f})
 
@@ -61,6 +62,9 @@ LLM_CONFIG = {} # Initialisation de la variable globale
 
 # --- Configuration de la détection binaire ---
 BINARY_DETECTION_CONFIG = {}
+
+# --- Configuration de l'exclusion de fichiers ---
+FILE_EXCLUSION_CONFIG = {}
 
 # --- État partagé pour les tâches de résumé ---
 progress_tasks = {}
@@ -127,7 +131,7 @@ def load_config():
     global INSTRUCTION_TEXT_1, INSTRUCTION_TEXT_2
     global LLM_SERVER_URL, LLM_SERVER_APIKEY, LLM_SERVER_MODEL, LLM_SERVER_ENABLED, LLM_SERVER_API_TYPE, LLM_SERVER_STREAM_RESPONSE
     global SUMMARIZER_LLM_URL, SUMMARIZER_LLM_APIKEY, SUMMARIZER_LLM_MODEL, SUMMARIZER_LLM_ENABLED, SUMMARIZER_LLM_API_TYPE, SUMMARIZER_LLM_PROMPT, SUMMARIZER_LLM_TIMEOUT, SUMMARIZER_MAX_WORKERS, SUMMARIZER_LLM_MODELS_LIST
-    global LLM_CONFIG, BINARY_DETECTION_CONFIG # Ajouter cette ligne
+    global LLM_CONFIG, BINARY_DETECTION_CONFIG, FILE_EXCLUSION_CONFIG # Ajouter cette ligne
     config = configparser.ConfigParser()
     try:
         if os.path.exists('config.ini'):
@@ -157,6 +161,21 @@ def load_config():
                 app.logger.warning("Section [BinaryDetection] not found in config.ini. Binary file filtering might be incomplete.")
                 BINARY_DETECTION_CONFIG['blacklist'] = set()
                 BINARY_DETECTION_CONFIG['whitelist'] = set()
+
+            # Charger la configuration d'exclusion de fichiers
+            if 'FileExclusion' in config:
+                file_blacklist_str = config.get('FileExclusion', 'file_blacklist', fallback='')
+                pattern_blacklist_str = config.get('FileExclusion', 'pattern_blacklist', fallback='')
+                
+                # Convertir les chaînes en sets/listes
+                FILE_EXCLUSION_CONFIG['file_blacklist'] = {f.strip() for f in file_blacklist_str.split(',') if f.strip()}
+                FILE_EXCLUSION_CONFIG['pattern_blacklist'] = [p.strip() for p in pattern_blacklist_str.split(',') if p.strip()]
+                
+                app.logger.info(f"File exclusion lists loaded: {len(FILE_EXCLUSION_CONFIG['file_blacklist'])} files, {len(FILE_EXCLUSION_CONFIG['pattern_blacklist'])} patterns")
+            else:
+                app.logger.warning("Section [FileExclusion] not found in config.ini.")
+                FILE_EXCLUSION_CONFIG['file_blacklist'] = set()
+                FILE_EXCLUSION_CONFIG['pattern_blacklist'] = []
 
             if 'LLMServer' in config:
                 LLM_SERVER_URL = config.get('LLMServer', 'url', fallback=None)
@@ -657,13 +676,32 @@ def upload_directory():
     for file_obj in uploaded_files:
         file_path_str = file_obj['path']
         ext = os.path.splitext(file_path_str)[1].lower()
+        filename = os.path.basename(file_path_str)
+        
+        # Vérifier d'abord les exclusions de fichiers spécifiques
+        if filename in FILE_EXCLUSION_CONFIG.get('file_blacklist', set()):
+            binary_files_detected.append(file_path_str)
+            app.logger.debug(f"Fichier exclu (blacklist): {filename}")
+            continue
+        
+        # Vérifier les patterns d'exclusion
+        excluded_by_pattern = False
+        for pattern in FILE_EXCLUSION_CONFIG.get('pattern_blacklist', []):
+            if fnmatch.fnmatch(filename, pattern):
+                binary_files_detected.append(file_path_str)
+                app.logger.debug(f"Fichier exclu (pattern '{pattern}'): {filename}")
+                excluded_by_pattern = True
+                break
+        
+        if excluded_by_pattern:
+            continue
 
-        # Niveau 1: Liste Noire (Rejet Immédiat)
+        # Niveau 1: Liste Noire d'extensions (Rejet Immédiat)
         if ext in BINARY_DETECTION_CONFIG.get('blacklist', set()):
             binary_files_detected.append(file_path_str)
             continue
 
-        # Niveau 2: Liste Blanche (Acceptation Immédiate)
+        # Niveau 2: Liste Blanche d'extensions (Acceptation Immédiate)
         if ext in BINARY_DETECTION_CONFIG.get('whitelist', set()):
             filtered_by_binary_detection.append(file_obj)
             continue

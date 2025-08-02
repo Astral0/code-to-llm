@@ -48,7 +48,16 @@ executable_path =
 
 [BinaryDetection]
 # Fichiers immédiatement rejetés (séparés par des virgules)
-extension_blacklist = .png, .jpg, .jpeg, .gif, .bmp, .ico, .exe, .dll, .so, .pdf, .zip, .gz, .rar, .mp3, .mp4, .avi, .mov, .woff, .woff2, .eot, .ttf, .otf, .class, .jar, .pyc, .bin, .dat, .dmg, .iso, .msi, , .cjs
+extension_blacklist = .png, .jpg, .jpeg, .gif, .bmp, .ico, .exe, .dll, .so, .pdf, .zip, .gz, .rar, .mp3, .mp4, .avi, .mov, .woff, .woff2, .eot, .ttf, .otf, .class, .jar, .pyc, .bin, .dat, .dmg, .iso, .msi, .cjs
 
 # Fichiers immédiatement acceptés sans analyse de contenu (séparés par des virgules)
 extension_whitelist = .py, .js, .html, .css, .json, .md, .txt, .sh, .yml, .yaml, .xml, .ini, .cfg, .conf, .rst, .ts, .jsx, .tsx, .toml, .sql
+
+[FileExclusion]
+# Fichiers spécifiques à exclure (séparés par des virgules)
+# Ces fichiers sont utiles dans Git mais pas pour le contexte LLM
+file_blacklist = .pnp.cjs, package-lock.json, yarn.lock, .DS_Store, Thumbs.db
+
+# Patterns à exclure (supporte * et ?)
+# Exemples: *.min.js, *-lock.json, test-*.js
+pattern_blacklist = *.min.js, *.min.css, *-lock.json, *.map

@@ -13,6 +13,7 @@ from web_server import app
 import pathspec
 from pathspec.patterns import GitWildMatchPattern
 from pathlib import Path
+import fnmatch
 from services.export_service import ExportService
 
 # Définir le chemin de stockage des données persistantes
@@ -32,12 +33,48 @@ def load_config():
         config.read(config_path, encoding='utf-8')
     else:
         print(f"Fichier de configuration {config_path} non trouvé, utilisation des valeurs par défaut")
-        return {'debug': False}
+        return {'debug': False, 'binary_blacklist': set(), 'binary_whitelist': set()}
     
     # Lire le paramètre debug avec une valeur par défaut
     debug_enabled = config.getboolean('Debug', 'debug', fallback=False)
     
-    return {'debug': debug_enabled}
+    # Lire la configuration de détection binaire
+    binary_blacklist = set()
+    binary_whitelist = set()
+    
+    if 'BinaryDetection' in config:
+        blacklist_str = config.get('BinaryDetection', 'extension_blacklist', fallback='')
+        whitelist_str = config.get('BinaryDetection', 'extension_whitelist', fallback='')
+        
+        # Convertir les chaînes en sets
+        binary_blacklist = {ext.strip() for ext in blacklist_str.split(',') if ext.strip()}
+        binary_whitelist = {ext.strip() for ext in whitelist_str.split(',') if ext.strip()}
+        
+        if debug_enabled:
+            print(f"Binary detection lists loaded: {len(binary_blacklist)} blacklisted, {len(binary_whitelist)} whitelisted")
+    
+    # Lire la configuration d'exclusion de fichiers
+    file_blacklist = set()
+    pattern_blacklist = []
+    
+    if 'FileExclusion' in config:
+        file_blacklist_str = config.get('FileExclusion', 'file_blacklist', fallback='')
+        pattern_blacklist_str = config.get('FileExclusion', 'pattern_blacklist', fallback='')
+        
+        # Convertir les chaînes en sets/listes
+        file_blacklist = {f.strip() for f in file_blacklist_str.split(',') if f.strip()}
+        pattern_blacklist = [p.strip() for p in pattern_blacklist_str.split(',') if p.strip()]
+        
+        if debug_enabled:
+            print(f"File exclusion lists loaded: {len(file_blacklist)} files, {len(pattern_blacklist)} patterns")
+    
+    return {
+        'debug': debug_enabled,
+        'binary_blacklist': binary_blacklist,
+        'binary_whitelist': binary_whitelist,
+        'file_blacklist': file_blacklist,
+        'pattern_blacklist': pattern_blacklist
+    }
 
 # Charger la configuration
 CONFIG = load_config()
@@ -405,24 +442,42 @@ class Api:
     def _filter_binary_files(self, files):
         """Filtre les fichiers binaires basé sur l'extension et le contenu"""
         filtered_files = []
-        binary_extensions = {
-            '.exe', '.dll', '.so', '.dylib', '.bin', '.img', '.iso',
-            '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.svg', '.ico',
-            '.mp3', '.mp4', '.avi', '.mov', '.wav', '.zip', '.rar',
-            '.7z', '.tar', '.gz', '.pdf', '.doc', '.docx', '.xls',
-            '.xlsx', '.ppt', '.pptx', '.woff', '.woff2', '.ttf', '.eot'
-        }
         
         for file_info in files:
             file_path = Path(file_info['absolute_path'])
+            ext = file_path.suffix.lower()
+            filename = file_path.name
             
-            # Filtrer par extension
-            if file_path.suffix.lower() in binary_extensions:
+            # Vérifier d'abord les exclusions de fichiers spécifiques
+            if filename in CONFIG['file_blacklist']:
+                if CONFIG['debug']:
+                    logging.debug(f"Ignoré (fichier dans la blacklist): {file_info['relative_path']}")
+                continue
+            
+            # Vérifier les patterns d'exclusion
+            excluded_by_pattern = False
+            for pattern in CONFIG['pattern_blacklist']:
+                if fnmatch.fnmatch(filename, pattern):
+                    if CONFIG['debug']:
+                        logging.debug(f"Ignoré (correspond au pattern '{pattern}'): {file_info['relative_path']}")
+                    excluded_by_pattern = True
+                    break
+            
+            if excluded_by_pattern:
+                continue
+            
+            # Niveau 1: Liste Noire d'extensions (Rejet Immédiat)
+            if ext in CONFIG['binary_blacklist']:
                 if CONFIG['debug']:
                     logging.debug(f"Ignoré (binaire par extension): {file_info['relative_path']}")
                 continue
             
-            # Vérifier le contenu pour les petits fichiers
+            # Niveau 2: Liste Blanche d'extensions (Acceptation Immédiate)
+            if ext in CONFIG['binary_whitelist']:
+                filtered_files.append(file_info)
+                continue
+            
+            # Niveau 3: Vérifier le contenu pour les petits fichiers
             try:
                 if file_info['size'] < 1024 * 1024:  # Moins de 1MB
                     with open(file_path, 'rb') as f:
