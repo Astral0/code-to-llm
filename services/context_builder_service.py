@@ -1,5 +1,6 @@
 import os
 import logging
+import re
 from typing import Dict, Any, Optional, List
 from .base_service import BaseService
 from .exceptions import ServiceException
@@ -170,3 +171,60 @@ class ContextBuilderService(BaseService):
                 stats.append(f"{i+1}. {file_data['path']} ({size_kb:.1f} KB)")
         
         return stats
+    
+    def compact_code(self, content: str) -> str:
+        """
+        Supprime les commentaires et lignes vides d'un bloc de code.
+        
+        Args:
+            content: Le contenu du code à compacter
+            
+        Returns:
+            Le code compacté
+        """
+        # Supprimer les commentaires sur une seule ligne (en gérant les # dans les chaînes de caractères)
+        content = re.sub(r'(?m)^ *#.*\n?', '', content)
+        # Supprimer les docstrings multilignes """..."""
+        content = re.sub(r'""".*?"""', '', content, flags=re.DOTALL)
+        # Supprimer les docstrings multilignes '''...'''
+        content = re.sub(r"'''.*?'''", '', content, flags=re.DOTALL)
+        # Supprimer les lignes vides résultantes
+        lines = [line for line in content.splitlines() if line.strip()]
+        return "\n".join(lines)
+    
+    def estimate_tokens(self, text: str) -> Dict[str, Any]:
+        """
+        Estime le nombre de tokens dans un texte.
+        Utilise une heuristique simple de 4 caractères par token.
+        
+        Args:
+            text: Le texte à analyser
+            
+        Returns:
+            Dict contenant les statistiques
+        """
+        char_count = len(text)
+        # Heuristique simple: en moyenne 4 caractères par token
+        estimated_tokens = char_count / 4
+        
+        # Déterminer la compatibilité avec les modèles
+        if estimated_tokens < 3500:
+            compatibility = "Compatible with most models (~4k+ context)"
+        elif estimated_tokens < 7000:
+            compatibility = "Compatible with standard models (~8k+ context)"
+        elif estimated_tokens < 14000:
+            compatibility = "Compatible with ~16k+ context models"
+        elif estimated_tokens < 28000:
+            compatibility = "Compatible with ~32k+ context models"
+        elif estimated_tokens < 100000:
+            compatibility = "Compatible with large models (~128k+ context)"
+        elif estimated_tokens < 180000:
+            compatibility = "Compatible with very large models (~200k+ context)"
+        else:
+            compatibility = "Very large size (>180k tokens), requires specific models or context reduction"
+        
+        return {
+            'char_count': char_count,
+            'estimated_tokens': int(estimated_tokens),
+            'model_compatibility': compatibility
+        }

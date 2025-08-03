@@ -207,6 +207,44 @@ extension_blacklist = .exe, .dll, .so, .pdf, .zip
 extension_whitelist = .py, .js, .html, .css, .json
 ```
 
+## 🏗️ Architecture
+
+L'application suit une architecture orientée services pour une meilleure modularité et testabilité :
+
+### Structure des Services
+
+```
+main_desktop.py (Api - Façade)
+├── GitService
+│   └── Exécution des commandes Git (diff)
+├── LlmApiService
+│   ├── Communication avec les APIs LLM
+│   └── Support du streaming avec retry intelligent
+├── FileService
+│   ├── Scan de répertoires avec gitignore
+│   ├── Filtrage des fichiers binaires
+│   └── Détection et masquage des secrets
+└── ContextBuilderService
+    ├── Construction du contexte formaté
+    ├── Génération de l'arbre des fichiers
+    └── Estimation des tokens
+```
+
+### Points Clés de l'Architecture
+
+- **Façade Pattern** : La classe `Api` expose une interface simple pour l'UI
+- **Dependency Injection** : Configuration centralisée injectée dans chaque service
+- **Separation of Concerns** : Chaque service a une responsabilité unique
+- **Testabilité** : Services isolés avec tests unitaires et d'intégration
+- **État Encapsulé** : FileService maintient l'état du scan (cache, répertoire courant)
+
+### Tests
+
+L'architecture inclut des tests complets :
+- Tests unitaires pour chaque service (`tests/test_*.py`)
+- Tests d'intégration pour la façade Api (`tests/test_api_integration.py`)
+- Mocks pour les dépendances externes (pywebview, requests)
+
 ## 🤝 Contribution
 
 Les contributions sont bienvenues ! N'hésitez pas à soumettre des Pull Requests.

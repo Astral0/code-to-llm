@@ -4,9 +4,20 @@ import pathspec
 from pathspec.patterns import GitWildMatchPattern
 from pathlib import Path
 import fnmatch
-from typing import Dict, Any, Optional, List
+import re
+from typing import Dict, Any, Optional, List, Tuple
 from .base_service import BaseService
 from .exceptions import FileServiceException
+
+
+# Import optionnel de detect-secrets
+try:
+    from detect_secrets import SecretsCollection
+    from detect_secrets.plugins import initialize as initialize_detect_secrets_plugins
+    HAS_DETECT_SECRETS = True
+except ImportError:
+    logging.warning("detect-secrets library not found. Secret masking will be disabled.")
+    HAS_DETECT_SECRETS = False
 
 
 class FileService(BaseService):
@@ -22,6 +33,8 @@ class FileService(BaseService):
         """
         super().__init__(config, logger)
         self.gitignore_cache = {}  # Cache pour les specs gitignore
+        self.file_cache = []  # Cache des fichiers scannés
+        self.current_directory = None  # Répertoire actuellement scanné
         
     def validate_config(self):
         """Valide la configuration du service."""
@@ -64,6 +77,10 @@ class FileService(BaseService):
             
             self.logger.info(f"Scan terminé: {len(filtered_files)} fichiers trouvés")
             
+            # Mettre à jour l'état interne
+            self.file_cache = filtered_files
+            self.current_directory = directory_path
+            
             return {
                 'success': True,
                 'directory': directory_path,
@@ -85,20 +102,41 @@ class FileService(BaseService):
             self.logger.error(error_msg)
             raise FileServiceException(error_msg)
     
-    def get_file_content(self, relative_path: str, current_directory: str, 
-                        file_cache: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def get_file_content(self, relative_path: str, current_directory: Optional[str] = None, 
+                        file_cache: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
         """
         Récupère le contenu d'un fichier.
         
+        Cette méthode utilise l'état interne de l'instance (self.current_directory, 
+        self.file_cache) si les paramètres current_directory et file_cache ne sont 
+        pas fournis. Cela permet deux modes d'utilisation :
+        
+        1. Mode avec état (après scan_local_directory) :
+           result = file_service.get_file_content('main.py')
+           
+        2. Mode sans état (paramètres explicites) :
+           result = file_service.get_file_content('main.py', '/path/to/dir', file_cache)
+        
         Args:
             relative_path: Le chemin relatif du fichier
-            current_directory: Le répertoire de base
-            file_cache: Le cache des fichiers scannés
+            current_directory: Le répertoire de base (utilise self.current_directory si None)
+            file_cache: Le cache des fichiers scannés (utilise self.file_cache si None)
             
         Returns:
-            Dict contenant le contenu du fichier
+            Dict contenant le contenu du fichier avec les clés :
+            - success (bool): Indique si la lecture a réussi
+            - content (str): Le contenu du fichier (si succès)
+            - path (str): Le chemin relatif du fichier (si succès)
+            - size (int): La taille du fichier (si succès)
+            - error (str): Message d'erreur (si échec)
         """
         try:
+            # Utiliser l'état interne si les paramètres ne sont pas fournis
+            if current_directory is None:
+                current_directory = self.current_directory
+            if file_cache is None:
+                file_cache = self.file_cache
+                
             if not current_directory:
                 return {'success': False, 'error': 'Aucun répertoire spécifié'}
             
@@ -124,20 +162,41 @@ class FileService(BaseService):
             self.logger.error(error_msg)
             return {'success': False, 'error': error_msg}
     
-    def get_file_contents_batch(self, selected_files: List[str], current_directory: str,
-                              file_cache: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def get_file_contents_batch(self, selected_files: List[str], current_directory: Optional[str] = None,
+                              file_cache: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
         """
         Récupère le contenu de plusieurs fichiers en batch.
         
+        Cette méthode utilise l'état interne de l'instance si les paramètres 
+        optionnels ne sont pas fournis. Idéal pour traiter plusieurs fichiers
+        après un scan_local_directory.
+        
+        Exemple d'utilisation :
+            # Après un scan
+            file_service.scan_local_directory('/project')
+            # Récupération batch utilisant l'état interne
+            result = file_service.get_file_contents_batch(['main.py', 'utils.py'])
+        
         Args:
-            selected_files: Liste des fichiers sélectionnés
-            current_directory: Le répertoire de base
-            file_cache: Le cache des fichiers
+            selected_files: Liste des chemins relatifs des fichiers sélectionnés
+            current_directory: Le répertoire de base (utilise self.current_directory si None)
+            file_cache: Le cache des fichiers (utilise self.file_cache si None)
             
         Returns:
-            Dict contenant les contenus des fichiers et les statistiques
+            Dict contenant :
+            - success (bool): Indique si l'opération a réussi
+            - file_contents (list): Liste des fichiers récupérés avec succès
+            - failed_files (list): Liste des fichiers qui n'ont pas pu être lus
+            - stats (dict): Statistiques de l'opération
+            - error (str): Message d'erreur global (si échec complet)
         """
         try:
+            # Utiliser l'état interne si les paramètres ne sont pas fournis
+            if current_directory is None:
+                current_directory = self.current_directory
+            if file_cache is None:
+                file_cache = self.file_cache
+                
             if not selected_files:
                 return {'success': False, 'error': 'Aucun fichier sélectionné'}
             
@@ -318,3 +377,126 @@ class FileService(BaseService):
                 
         return filtered_files
     
+    def detect_and_redact_secrets(self, content: str, file_path: str, 
+                                  redact_mode: str = 'mask') -> Tuple[str, int]:
+        """
+        Détecte et masque les secrets dans le contenu d'un fichier.
+        
+        Args:
+            content: Le contenu du fichier à analyser
+            file_path: Le chemin du fichier (utilisé pour les règles spécifiques au format)
+            redact_mode: Le mode de redaction ('mask' pour [MASKED SECRET], 'remove' pour supprimer la ligne)
+        
+        Returns:
+            tuple: (contenu redacté, nombre de secrets détectés)
+        """
+        # Vérifier si la bibliothèque detect-secrets est disponible
+        if not HAS_DETECT_SECRETS:
+            return content, 0
+
+        try:
+            # Initialiser la collection de secrets
+            secrets = SecretsCollection()
+            
+            # Initialiser les plugins de détection disponibles
+            plugins_used = list(initialize_detect_secrets_plugins.from_parser_builder([]))
+            for plugin in plugins_used:
+                try:
+                    secrets.scan_string_content(content, plugin, path=file_path)
+                except Exception as plugin_error:
+                    self.logger.debug(f"Plugin {plugin.__class__.__name__} failed for {file_path}: {plugin_error}")
+            
+            # Si aucun secret n'est détecté, retourner le contenu original
+            if not secrets.data:
+                return content, 0
+            
+            # Redacter les secrets détectés
+            lines = content.splitlines()
+            redacted_lines = list(lines)  # Copie pour modification
+            
+            # Trier les secrets par numéro de ligne
+            secrets_by_line = {}
+            for filename, secret_list in secrets.data.items():
+                for secret in secret_list:
+                    line_num = secret['line_number'] - 1  # Ajuster pour l'indexation à 0
+                    if line_num not in secrets_by_line:
+                        secrets_by_line[line_num] = []
+                    secrets_by_line[line_num].append(secret)
+            
+            # Redacter chaque ligne contenant des secrets
+            secrets_count = 0
+            for line_num, line_secrets in sorted(secrets_by_line.items(), reverse=True):
+                if line_num >= len(redacted_lines):
+                    continue  # Ignorer si la ligne est hors limites
+                
+                if redact_mode == 'remove':
+                    # Supprimer la ligne entière
+                    redacted_lines[line_num] = f"[LINE REMOVED DUE TO DETECTED SECRET]"
+                    secrets_count += len(line_secrets)
+                else:
+                    # Mode par défaut: masquer les secrets individuellement
+                    current_line = redacted_lines[line_num]
+                    redacted_lines[line_num] = f"[LINE CONTAINING SENSITIVE DATA: {line_secrets[0]['type']}]"
+                    secrets_count += 1
+            
+            # Reconstituer le contenu avec les lignes redactées
+            redacted_content = "\n".join(redacted_lines)
+            
+            return redacted_content, secrets_count
+            
+        except Exception as e:
+            self.logger.error(f"Error using detect-secrets: {e}")
+            return content, 0
+
+    def detect_and_redact_with_regex(self, content: str, file_path: str) -> Tuple[str, int]:
+        """
+        Détecte et masque les patterns courants de secrets avec des expressions régulières.
+        Complémentaire à detect-secrets pour des cas spécifiques.
+        
+        Args:
+            content: Le contenu du fichier
+            file_path: Le chemin du fichier (pour le logging)
+            
+        Returns:
+            tuple: (contenu redacté, nombre de secrets détectés)
+        """
+        # Patterns courants de secrets et informations d'identification
+        patterns = {
+            # API Keys - différents formats courants
+            'api_key': r'(?i)(api[_-]?key|apikey|api_token|auth_token|authorization_token|bearer_token)["\']?\s*[:=]\s*["\']?([0-9a-zA-Z\-_\.]{16,128})["\']?',
+            # Tokens divers (OAuth, JWT, etc.)
+            'token': r'(?i)(access_token|auth_token|token)["\']?\s*[:=]\s*["\']?([0-9a-zA-Z._\-]{8,64})["\']?',
+            # Clés AWS
+            'aws_key': r'(?i)(AKIA[0-9A-Z]{16})',
+            # URLs contenant username:password
+            'url_auth': r'(?i)https?://[^:@/\s]+:[^:@/\s]+@[^/\s]+',
+            # Clés privées
+            'private_key_pem': r'-----BEGIN ((RSA|EC|OPENSSH|PGP) )?PRIVATE KEY-----',
+            # Documentation de credentials/variables sensibles avec valeurs
+            'credentials_doc': r'(?i)# ?(password|secret|key|token|credential).*[=:] ?"[^"]{3,}"',
+            # Clés AWS
+            'aws_secret': r'(?i)(aws[\w_\-]*secret[\w_\-]*key)["\']?\s*[:=]\s*["\']?([0-9a-zA-Z\-_\/+]{40})["\']?',
+            # Clés privées
+            'private_key': r'(?i)(-----BEGIN [A-Z]+ PRIVATE KEY-----)',
+            # Connection strings
+            'connection_string': r'(?i)(mongodb|mysql|postgresql|sqlserver|redis|amqp)://[^:]+:[^@]+@[:\w\.\-]+[/:\w\d\?=&%\-\.]*'
+        }
+        
+        # Initialiser les variables
+        lines = content.splitlines()
+        redacted_lines = list(lines)
+        count = 0
+        
+        # Parcourir chaque ligne pour détecter les patterns
+        for i, line in enumerate(lines):
+            for pattern_name, pattern in patterns.items():
+                matches = list(re.finditer(pattern, line))
+                if matches:
+                    redacted_lines[i] = f"[LINE CONTAINING SENSITIVE DATA: {pattern_name}]"
+                    count += 1
+                    break  # Passer à la ligne suivante une fois qu'un pattern est trouvé
+        
+        # Reconstituer le contenu
+        redacted_content = "\n".join(redacted_lines)
+        
+        return redacted_content, count

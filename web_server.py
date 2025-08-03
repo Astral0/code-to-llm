@@ -17,6 +17,10 @@ import uuid
 import time
 import fnmatch
 
+# Import des services pour centraliser la logique
+from services.file_service import FileService
+from services.context_builder_service import ContextBuilderService
+
 TEXTCHARS = bytearray({7, 8, 9, 10, 12, 13, 27} | set(range(0x20, 0x100)) - {0x7f})
 
 def is_binary_string(bytes_to_check: bytes) -> bool:
@@ -65,6 +69,10 @@ FILE_EXCLUSION_CONFIG = {}
 # --- État partagé pour les tâches de résumé ---
 progress_tasks = {}
 progress_lock = threading.Lock()
+
+# --- Initialisation des services ---
+file_service = None
+context_builder_service = None
 
 
 def fetch_ollama_models(url):
@@ -274,6 +282,24 @@ def load_config():
             app.logger.warning("config.ini non trouvé, utilisation des instructions par défaut.")
     except Exception as e:
         app.logger.error(f"Erreur lors de la lecture de config.ini: {e}. Utilisation des instructions par défaut.")
+    
+    # Initialiser les services avec la configuration chargée
+    global file_service, context_builder_service
+    
+    # Configuration pour FileService
+    file_service_config = {
+        'debug': False,
+        'binary_blacklist': BINARY_DETECTION_CONFIG.get('blacklist', set()),
+        'binary_whitelist': BINARY_DETECTION_CONFIG.get('whitelist', set()),
+        'file_blacklist': FILE_EXCLUSION_CONFIG.get('file_blacklist', set()),
+        'pattern_blacklist': FILE_EXCLUSION_CONFIG.get('pattern_blacklist', [])
+    }
+    file_service = FileService(file_service_config)
+    
+    # Configuration pour ContextBuilderService
+    context_builder_service = ContextBuilderService({})
+    
+    app.logger.info("Services FileService et ContextBuilderService initialisés")
 
 load_config() # Charger la configuration au démarrage
 
@@ -284,159 +310,9 @@ analysis_cache = {
     "ignored_patterns": []  # Store ignored patterns for debugging
 }
 
-# Import pour detect-secrets avec corrections
-try:
-    from detect_secrets import SecretsCollection
-    from detect_secrets.settings import default_settings
-    # from detect_secrets.plugins.base import BasePlugin # Moins utilisé directement
-    # from detect_secrets.core import baseline # Moins utilisé directement
-    from detect_secrets.plugins import initialize as initialize_detect_secrets_plugins
-    HAS_DETECT_SECRETS = True
-except ImportError:
-    app.logger.warning("detect-secrets library not found. Secret masking will be disabled.")
-    HAS_DETECT_SECRETS = False
-
 from pathspec.patterns import GitWildMatchPattern  # Explicit import
 
-# --- Fonctions de détection et masquage des secrets ---
-
-def detect_and_redact_secrets(content, file_path, redact_mode='mask'):
-    """
-    Détecte et masque les secrets dans le contenu d'un fichier.
-    
-    Args:
-        content (str): Le contenu du fichier à analyser
-        file_path (str): Le chemin du fichier (utilisé pour les règles spécifiques au format)
-        redact_mode (str): Le mode de redaction ('mask' pour [MASKED SECRET], 'remove' pour supprimer la ligne)
-    
-    Returns:
-        tuple: (contenu redacté, nombre de secrets détectés)
-    """
-    # Vérifier si la bibliothèque detect-secrets est disponible
-    if not HAS_DETECT_SECRETS:
-        return content, 0
-
-    try:
-        # Initialiser la collection de secrets
-        secrets = SecretsCollection()
-        
-        # Initialiser les plugins de détection disponibles
-        plugins_used = list(initialize_detect_secrets_plugins.from_parser_builder([]))
-        for plugin in plugins_used:
-            try:
-                secrets.scan_string_content(content, plugin, path=file_path)
-            except Exception as plugin_error:
-                app.logger.debug(f"Plugin {plugin.__class__.__name__} failed for {file_path}: {plugin_error}")
-        
-        # Si aucun secret n'est détecté, retourner le contenu original
-        if not secrets.data:
-            return content, 0
-        
-        # Redacter les secrets détectés
-        lines = content.splitlines()
-        redacted_lines = list(lines)  # Copie pour modification
-        
-        # Trier les secrets par numéro de ligne
-        secrets_by_line = {}
-        for filename, secret_list in secrets.data.items():
-            for secret in secret_list:
-                line_num = secret['line_number'] - 1  # Ajuster pour l'indexation à 0
-                if line_num not in secrets_by_line:
-                    secrets_by_line[line_num] = []
-                secrets_by_line[line_num].append(secret)
-        
-        # Redacter chaque ligne contenant des secrets
-        secrets_count = 0
-        for line_num, line_secrets in sorted(secrets_by_line.items(), reverse=True):
-            if line_num >= len(redacted_lines):
-                continue  # Ignorer si la ligne est hors limites
-            
-            if redact_mode == 'remove':
-                # Supprimer la ligne entière
-                redacted_lines[line_num] = f"[LINE REMOVED DUE TO DETECTED SECRET]"
-                secrets_count += len(line_secrets)
-            else:
-                # Mode par défaut: masquer les secrets individuellement
-                # Pour l'API actuelle de detect-secrets, nous ne pouvons pas facilement
-                # obtenir la position exacte du secret. Masquons donc la ligne entière.
-                current_line = redacted_lines[line_num]
-                redacted_lines[line_num] = f"[LINE CONTAINING SENSITIVE DATA: {line_secrets[0]['type']}]"
-                secrets_count += 1
-        
-        # Reconstituer le contenu avec les lignes redactées
-        redacted_content = "\n".join(redacted_lines)
-        
-        return redacted_content, secrets_count
-        
-    except Exception as e:
-        app.logger.error(f"Error using detect-secrets: {e}")
-        return content, 0
-
-# Fonction supplémentaire pour détecter les secrets avec regex
-def detect_and_redact_with_regex(content, file_path):
-    """
-    Détecte et masque les patterns courants de secrets avec des expressions régulières.
-    Complémentaire à detect-secrets pour des cas spécifiques.
-    
-    Args:
-        content (str): Le contenu du fichier
-        file_path (str): Le chemin du fichier (pour le logging)
-        
-    Returns:
-        tuple: (contenu redacté, nombre de secrets détectés)
-    """
-    # Patterns courants de secrets et informations d'identification
-    patterns = {
-        # API Keys - différents formats courants
-        'api_key': r'(?i)(api[_-]?key|apikey|api_token|auth_token|authorization_token|bearer_token)["\']?\s*[:=]\s*["\']?([0-9a-zA-Z\-_\.]{16,128})["\']?',
-        # Tokens divers (OAuth, JWT, etc.)
-        'token': r'(?i)(access_token|auth_token|token)["\']?\s*[:=]\s*["\']?([0-9a-zA-Z._\-]{8,64})["\']?',
-        # Clés AWS
-        'aws_key': r'(?i)(AKIA[0-9A-Z]{16})',
-        # URLs contenant username:password
-        'url_auth': r'(?i)https?://[^:@/\s]+:[^:@/\s]+@[^/\s]+',
-        # Clés privées
-        'private_key_pem': r'-----BEGIN ((RSA|EC|OPENSSH|PGP) )?PRIVATE KEY-----',
-        # Documentation de credentials/variables sensibles avec valeurs
-        'credentials_doc': r'(?i)# ?(password|secret|key|token|credential).*[=:] ?"[^"]{3,}"',
-        # Clés AWS
-        'aws_secret': r'(?i)(aws[\w_\-]*secret[\w_\-]*key)["\']?\s*[:=]\s*["\']?([0-9a-zA-Z\-_\/+]{40})["\']?',
-        # Clés privées
-        'private_key': r'(?i)(-----BEGIN [A-Z]+ PRIVATE KEY-----)',
-        # Connection strings
-        'connection_string': r'(?i)(mongodb|mysql|postgresql|sqlserver|redis|amqp)://[^:]+:[^@]+@[:\w\.\-]+[/:\w\d\?=&%\-\.]*'
-    }
-    
-    # Initialiser les variables
-    lines = content.splitlines()
-    redacted_lines = list(lines)
-    count = 0
-    
-    # Parcourir chaque ligne pour détecter les patterns
-    for i, line in enumerate(lines):
-        for pattern_name, pattern in patterns.items():
-            matches = list(re.finditer(pattern, line))
-            if matches:
-                redacted_lines[i] = f"[LINE CONTAINING SENSITIVE DATA: {pattern_name}]"
-                count += 1
-                break  # Passer à la ligne suivante une fois qu'un pattern est trouvé
-    
-    # Reconstituer le contenu
-    redacted_content = "\n".join(redacted_lines)
-    
-    return redacted_content, count
-
-def compact_code(content: str) -> str:
-    """Supprime les commentaires et lignes vides d'un bloc de code."""
-    # Supprimer les commentaires sur une seule ligne (en gérant les # dans les chaînes de caractères)
-    content = re.sub(r'(?m)^ *#.*\n?', '', content)
-    # Supprimer les docstrings multilignes """..."""
-    content = re.sub(r'""".*?"""', '', content, flags=re.DOTALL)
-    # Supprimer les docstrings multilignes '''...'''
-    content = re.sub(r"'''.*?'''", '', content, flags=re.DOTALL)
-    # Supprimer les lignes vides résultantes
-    lines = [line for line in content.splitlines() if line.strip()]
-    return "\n".join(lines)
+# Les fonctions de détection de secrets et compact_code sont maintenant dans les services
 
 # --- Utility functions to build the tree and context ---
 
@@ -484,40 +360,7 @@ def detect_language(filename):
     }
     return lang_map.get(ext, "")
 
-def estimate_tokens(text):
-    """
-    Estimates the number of tokens in a text.
-    Uses a simple heuristic of 4 characters per token.
-    """
-    char_count = len(text)
-    # Simple heuristic: on average 4 characters per token
-    estimated_tokens = char_count / 4
-    
-    # Ajouter un message au sujet du masquage des secrets dans l'estimation
-    masked_secrets_prefix = " (including masked sensitive information)" if "SENSITIVE DATA" in text else ""
-    
-    # Retourner l'estimation avec un message sur le masquage si applicable
-    
-    return char_count, estimated_tokens
-
-def get_model_compatibility(tokens):
-    """
-    Returns information about model compatibility based on the estimated token count.
-    """
-    if tokens < 3500:
-        return "Compatible with most models (~4k+ context)"
-    elif tokens < 7000:
-        return "Compatible with standard models (~8k+ context)"
-    elif tokens < 14000:
-        return "Compatible with ~16k+ context models"
-    elif tokens < 28000:
-        return "Compatible with ~32k+ context models"
-    elif tokens < 100000:
-        return "Compatible with large models (~128k+ context)"
-    elif tokens < 180000:
-        return "Compatible with very large models (~200k+ context)"
-    else:
-        return "Very large size (>180k tokens), requires specific models or context reduction"
+# Les fonctions estimate_tokens et get_model_compatibility sont maintenant dans ContextBuilderService
 
 def build_uploaded_context_string(uploaded_files, root_name="Uploaded_Directory", enable_masking=True, mask_mode="mask", instructions=None):
     # Generate the tree from relative paths
@@ -557,10 +400,11 @@ def build_uploaded_context_string(uploaded_files, root_name="Uploaded_Directory"
         secrets_count_regex = 0
         
         if enable_masking:
-            redacted_content, secrets_count_ds = detect_and_redact_secrets(content, relative_path, mask_mode)
+            # Utiliser FileService pour la détection et le masquage des secrets
+            redacted_content, secrets_count_ds = file_service.detect_and_redact_secrets(content, relative_path, mask_mode)
             # Apply regex on potentially already redacted content if first pass found something.
             # Or on original if first pass found nothing.
-            final_redacted_content, secrets_count_regex = detect_and_redact_with_regex(redacted_content, relative_path)
+            final_redacted_content, secrets_count_regex = file_service.detect_and_redact_with_regex(redacted_content, relative_path)
             if secrets_count_regex > 0 : # if regex found new things
                  redacted_content = final_redacted_content
 
@@ -585,8 +429,11 @@ def build_uploaded_context_string(uploaded_files, root_name="Uploaded_Directory"
     
     full_context = "".join(context_parts)
     
-    char_count_val, estimated_tokens_val = estimate_tokens(full_context)
-    model_compatibility_val = get_model_compatibility(estimated_tokens_val)
+    # Utiliser ContextBuilderService pour l'estimation des tokens
+    token_stats = context_builder_service.estimate_tokens(full_context)
+    char_count_val = token_stats['char_count']
+    estimated_tokens_val = token_stats['estimated_tokens']
+    model_compatibility_val = token_stats['model_compatibility']
     
     # Calculer la taille de chaque fichier et les trier
     files_with_size = [
@@ -893,7 +740,7 @@ def generate_context():
         app.logger.info("Applying 'Compact Mode' compression.")
         for file_obj in context_files:
             if file_obj['content']:
-                file_obj['content'] = compact_code(file_obj['content'])
+                file_obj['content'] = context_builder_service.compact_code(file_obj['content'])
     
     elif compression_mode == "summarize":
         app.logger.info("Applying 'Summarize with AI' compression.")
