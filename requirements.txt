@@ -1,9 +1,8 @@
-#--index-url https://si-devops-mirror.edf.fr/repository/pypi.python.org/simple
+# Requirements for desktop-only version
 Flask>=2.0
 pathspec>=0.9
 detect-secrets>=1.4.0
 requests>=2.20
-selenium
 pyperclip
 Flask-SocketIO
 pywebview

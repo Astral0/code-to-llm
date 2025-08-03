@@ -53,8 +53,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     
     // --- DOM element references ---
-    const directoryPicker = document.getElementById('directoryPicker');
-    const analyzeBtn = document.getElementById('analyzeBtn');
     const analyzeSpinner = document.getElementById('analyze-spinner');
     const analyzeError = document.getElementById('analyze-error');
     const analyzeStatusContainer = document.getElementById('analyze-status');
@@ -232,13 +230,10 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // --- Fonction pour sauvegarder le dernier répertoire ---
-    function saveLastDirectory(files) {
-        if (files && files.length > 0) {
-            // Récupérer le chemin du premier fichier pour identifier le répertoire
-            const firstFilePath = files[0].webkitRelativePath || files[0].name;
-            const directoryName = firstFilePath.split('/')[0];
-            localStorage.setItem('lastSelectedDirectory', directoryName);
-            console.log("Répertoire sauvegardé:", directoryName);
+    function saveLastDirectory(dirPath) {
+        if (dirPath) {
+            localStorage.setItem('lastSelectedDirectory', dirPath);
+            console.log("Répertoire sauvegardé:", dirPath);
         }
     }
 
@@ -400,125 +395,6 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // --- Mode Web existant (analyse) ---
-    analyzeBtn.addEventListener('click', () => {
-        console.log("Analyze button clicked (Web mode).");
-        const files = directoryPicker.files;
-        if (!files || files.length === 0) {
-            showError(analyzeError, "Please select a directory.", analyzeStatusContainer);
-            console.error("No directory selected or no files found in selected directory.");
-            return;
-        }
-
-        isDesktopMode = false;
-        
-        // Sauvegarder le répertoire sélectionné
-        saveLastDirectory(files);
-
-        // --- Partie 1: Mises à jour immédiates de l'interface utilisateur ---
-        hideError(analyzeError);
-        showSpinner(analyzeSpinner);
-        analyzeBtn.disabled = true; // Désactiver le bouton pour éviter les doubles clics
-        hideElement(fileSelectionSection);
-        hideElement(generationSection);
-        hideElement(resultAndChatArea);
-        fileListDiv.innerHTML = '<p class="text-muted text-center placeholder-message">Analyzing...</p>';
-        currentFilesData = [];
-        includedFilePaths = [];
-
-        // Réinitialiser les cases à cocher de sélection rapide
-        if (selectMdCheckbox) selectMdCheckbox.checked = false;
-        if (selectDevCheckbox) selectDevCheckbox.checked = false;
-
-        // Réinitialiser l'état des boutons de génération/régénération
-        showElement(generateBtn);
-        hideElement(regenerateBtn);
-
-
-        // --- Partie 2: Logique principale différée pour permettre le rafraîchissement de l'interface ---
-        setTimeout(async () => {
-            try {
-                // Read all files using FileReader and retrieve their full relative path
-                const readFilePromises = [];
-                for (let i = 0; i < files.length; i++) {
-                    const file = files[i];
-                    readFilePromises.push(new Promise((resolve, reject) => {
-                        const reader = new FileReader();
-                        reader.onload = () => {
-                            resolve({
-                                name: file.name,
-                                path: file.webkitRelativePath || file.name,
-                                content: reader.result
-                            });
-                        };
-                        reader.onerror = () => {
-                            console.error(`FileReader error for ${file.name}:`, reader.error);
-                            reject(new Error(`Error reading file ${file.name}.`));
-                        };
-                        reader.readAsText(file);
-                    }));
-                }
-
-                const uploadedFiles = await Promise.all(readFilePromises);
-                currentFilesData = uploadedFiles;
-                
-                // Send the uploaded data to the server
-                const response = await fetch('/upload', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-                    body: JSON.stringify({ files: uploadedFiles })
-                });
-                const data = await response.json();
-                if (!response.ok || !data.success) {
-                    throw new Error(data.error || `Error ${response.status}`);
-                }
-                
-                includedFilePaths = data.files.map(f => f.path);
-                renderFileList(data.files);
-                hideError(analyzeError);
-
-                if (isRegeneratingFlowActive) {
-                    // Re-apply preserved selection
-                    fileListDiv.querySelectorAll('.form-check-input').forEach(checkbox => {
-                        checkbox.checked = selectionToPreserveForRegeneration.has(checkbox.value);
-                    });
-                    selectionToPreserveForRegeneration.clear();
-                    isRegeneratingFlowActive = false;
-
-                    showElement(fileSelectionSection);
-                    showElement(generationSection);
-                    
-                    // await executeActualGeneration(); // Automatically generate context
-                } else {
-                    // Normal flow
-                    selectAllBtn.click();
-                    fileListDiv.querySelectorAll('.form-check-input').forEach(checkbox => {
-                        // On décoche uniquement la case du fichier "dev" lui-même
-                        if (isDevFile(checkbox.value)) {
-                            checkbox.checked = false;
-                        }
-                    });
-                    // La fonction suivante s'occupera de mettre à jour l'état des dossiers parents
-                    fileListDiv.querySelectorAll('li.file .form-check-input').forEach(updateParentCheckboxes);
-                    showElement(fileSelectionSection);
-                    showElement(generationSection);
-                }
-
-                if (!generationSection.classList.contains('d-none')) {
-                    generationSection.scrollIntoView({ behavior: 'smooth' });
-                }
-
-            } catch (error) {
-                console.error("Analysis error:", error);
-                showError(analyzeError, `Analysis error: ${error.message}`, analyzeStatusContainer);
-                fileListDiv.innerHTML = '<p class="text-danger text-center placeholder-message">Analysis failed.</p>';
-                showElement(fileSelectionSection);
-            } finally {
-                hideSpinner(analyzeSpinner);
-                analyzeBtn.disabled = false; // Réactiver le bouton
-            }
-        }, 0); // Le délai de 0 permet au navigateur de redessiner l'interface
-    });
 
     // --- Render file tree ---
     function renderFileList(files) {
@@ -1173,7 +1049,9 @@ document.addEventListener('DOMContentLoaded', () => {
     generateBtn.addEventListener('click', executeActualGeneration);
     regenerateBtn.addEventListener('click', () => {
         isRegeneratingFlowActive = true;
-        analyzeBtn.click(); // Relancer le flux d'analyse, qui réappliquera la sélection
+        if (scanDirectoryBtn) {
+            scanDirectoryBtn.click(); // Relancer le scan du répertoire
+        }
     });
 
     // --- Copy the generated context to the clipboard ---

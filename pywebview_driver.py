@@ -1,7 +1,14 @@
 # pywebview_driver.py
 
 import webview
-from selenium.webdriver.common.by import By
+# Enum local pour remplacer selenium.By
+class By:
+    ID = "id"
+    NAME = "name"
+    CLASS_NAME = "class name"
+    TAG_NAME = "tag name"
+    CSS_SELECTOR = "css selector"
+    XPATH = "xpath"
 import json
 
 class PywebviewElement:

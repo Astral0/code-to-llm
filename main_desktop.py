@@ -7,7 +7,14 @@ import appdirs
 import configparser
 import logging
 import re
-from selenium.webdriver.common.by import By
+# Enum local pour remplacer selenium.By
+class By:
+    ID = "id"
+    NAME = "name"
+    CLASS_NAME = "class name"
+    TAG_NAME = "tag name"
+    CSS_SELECTOR = "css selector"
+    XPATH = "xpath"
 from pywebview_driver import PywebviewDriver
 from web_server import app
 import pathspec

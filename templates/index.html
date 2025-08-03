@@ -23,7 +23,7 @@
       <div class="card-body">
         <!-- Mode Desktop avec scan local -->
         <div id="desktop-mode" class="mb-3">
-          <label class="form-label">Mode Desktop - Sélection locale :</label>
+          <label class="form-label">Sélection d'un répertoire local :</label>
           <div class="d-flex gap-2 align-items-center">
             <button class="btn btn-outline-primary" type="button" id="selectDirectoryBtn">
               <i class="fas fa-folder-open"></i> Sélectionner un répertoire
@@ -31,29 +31,13 @@
             <span id="selected-directory-path" class="text-muted"></span>
           </div>
           <div class="form-text">
-            Utilise la boîte de dialogue native pour sélectionner un répertoire. Les fichiers seront lus directement depuis le disque.
+            Utilise la boîte de dialogue native pour sélectionner un répertoire.
           </div>
           <button class="btn btn-success mt-2 d-none" type="button" id="scanDirectoryBtn">
             <i class="fas fa-search"></i> Scanner le répertoire
           </button>
         </div>
         
-        <!-- Séparateur -->
-        <div class="text-center my-3">
-          <span class="badge bg-secondary">OU</span>
-        </div>
-        
-        <!-- Mode Web classique -->
-        <div id="web-mode" class="mb-3">
-          <label for="directoryPicker" class="form-label">Mode Web - Upload de fichiers :</label>
-          <div class="input-group">
-            <span class="input-group-text"><i class="fas fa-upload"></i></span>
-            <input type="file" class="form-control" id="directoryPicker" webkitdirectory directory multiple>
-          </div>
-          <div class="form-text">
-            Sélectionne un répertoire local. Les fichiers seront uploadés pour analyse.
-          </div>
-        </div>
         
         <div id="analyze-status" class="mt-2 d-flex align-items-center" style="min-height: 24px;">
           <div id="analyze-spinner" class="spinner-border spinner-border-sm text-primary me-2 d-none" role="status">
@@ -61,9 +45,6 @@
           </div>
           <div id="analyze-error" class="alert alert-danger p-1 mb-0 d-none" role="alert" style="font-size: 0.9em;"></div>
         </div>
-        <button class="btn btn-primary mt-3" type="button" id="analyzeBtn" title="Analyze directory">
-          <i class="fas fa-search"></i> Analyser le répertoire (Upload)
-        </button>
       </div>
     </section>
     
@@ -207,38 +188,6 @@
             </button>
           </div>
 
-          <div id="browserControlSection" class="card mt-4">
-            <div class="card-header">
-                <i class="fa-solid fa-rocket"></i> Send to External Browser
-            </div>
-            <div class="card-body">
-                <div class="mb-3">
-                    <label for="llm-destination-selector" class="form-label">1. Choose a destination:</label>
-                    <select id="llm-destination-selector" class="form-select">
-                        <option value="chatgpt">ChatGPT</option>
-                        <option value="gemini" selected>Gemini</option>
-                    </select>
-                </div>
-                <div class="mb-3">
-                    <label class="form-label">2. Launch and sign in:</label>
-                    <div class="d-grid gap-2">
-                        <button id="launchSeleniumBtn" class="btn btn-outline-primary">Launch browser</button>
-                        <button id="launchPywebviewBtn" class="btn btn-outline-primary desktop-only">Launch pywebview</button>
-                    </div>
-                    <div class="form-text">Leave the window open and sign in manually.</div>
-                </div>
-                <div class="mb-3">
-                    <label class="form-label">3. Attach to browser:</label>
-                    <button id="attachBrowserBtn" class="btn btn-outline-info w-100">Attach to Browser</button>
-                    <p class="mt-2">Status: <span id="browser-status" class="badge bg-secondary">Disconnected</span></p>
-                </div>
-                <hr>
-                <div class="mb-3">
-                    <label class="form-label">4. Send the generated context:</label>
-                    <button id="sendContextBtn" class="btn btn-primary w-100" disabled>Send Context</button>
-                </div>
-            </div>
-        </div>
 
           {% if llm_feature_enabled %}
           <div id="llmInteractionContainer" class="mt-3">

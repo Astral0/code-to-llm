@@ -1,6 +1,5 @@
 # web_server.py
 from flask import Flask, request, jsonify, render_template, Response
-from services.browser_manager import BrowserManager
 from flask_socketio import SocketIO
 import sys
 import os
@@ -27,9 +26,6 @@ def is_binary_string(bytes_to_check: bytes) -> bool:
 app = Flask(__name__, template_folder='templates', static_folder='static')
 
 socketio = SocketIO(app, cors_allowed_origins="*") # Ajout de cors_allowed_origins
-browser_manager = BrowserManager()
-# Configure le logger et socketio dans le browser_manager
-browser_manager.set_integrations(socketio, app.logger)
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -1170,60 +1166,7 @@ def handle_connect():
 def handle_disconnect():
     app.logger.info('Client Socket.IO déconnecté')
 
-@app.route('/browser/launch', methods=['POST'])
-def launch_browser():
-    data = request.get_json()
-    llm_type = data.get('llm_type', 'chatgpt')
-    if not llm_type in LLM_CONFIG:
-        return jsonify({"error": f"LLM Type '{llm_type}' non configuré."}), 400
-    
-    success = browser_manager.launch_browser(llm_type, LLM_CONFIG)
-    if success:
-        return jsonify({"message": f"Navigateur pour {llm_type} lancé."})
-    return jsonify({"error": "Échec du lancement du navigateur."}), 500
 
-@app.route('/browser/attach', methods=['POST'])
-def attach_browser():
-    success = browser_manager.attach_browser()
-    if success:
-        return jsonify({"message": "Connecté au navigateur."})
-    return jsonify({"error": "Échec de la connexion au navigateur."}), 500
-
-@app.route('/browser/send_context', methods=['POST'])
-def send_context_to_browser():
-    data = request.get_json()
-    context = data.get('context')
-    llm_type = data.get('llm_type') # Récupérer le llm_type
-    
-    if not context:
-        return jsonify({"error": "Le contexte est manquant."}), 400
-    
-    if not llm_type:
-        return jsonify({"error": "Le type de LLM est manquant."}), 400
-
-    success = browser_manager.send_context_to_browser(context, LLM_CONFIG, llm_type) # Passer llm_type
-    if success:
-        return jsonify({"message": "Contexte envoyé au navigateur."})
-    
-    return jsonify({"error": "Échec de l'envoi du contexte au navigateur."}), 500
-
-if __name__ == '__main__':
-    port = 8080
-    host = '127.0.0.1'
-    if '--port' in sys.argv:
-        try:
-            port = int(sys.argv[sys.argv.index('--port') + 1])
-        except (IndexError, ValueError):
-            print("Erreur: --port nécessite un argument de numéro de port valide.", file=sys.stderr)
-            sys.exit(1)
-    if '--host' in sys.argv:
-        try:
-            host = sys.argv[sys.argv.index('--host') + 1]
-        except IndexError:
-            print("Erreur: --host nécessite un argument d'adresse IP.", file=sys.stderr)
-            sys.exit(1)
-            
-    socketio.run(app, host=host, port=port, debug=False)
 
 def summarize_code_with_llm(content: str, file_path: str, model: str) -> str:
     """Appelle le LLM de résumé pour obtenir un résumé du code en utilisant l'endpoint /api/generate."""
