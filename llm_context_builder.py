@@ -185,7 +185,7 @@ def load_gitignore(repo_path: Path) -> pathspec.PathSpec:
         logging.debug(f"File {gitignore_path} not found.")
 
     # Add default patterns that are almost always useful
-    default_patterns = ['.git/', '__pycache__/', '.gitignore']
+    default_patterns = ['.git/', '__pycache__/', '.gitignore', '.vscode/', '.idea/', '.kilocode/', '.claude/']
     # Combine rules from file (if any) and default rules
     all_lines = cleaned_lines + default_patterns
     logging.debug(f"Total rule lines for PathSpec processing: {len(all_lines)}")

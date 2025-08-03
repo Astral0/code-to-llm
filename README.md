@@ -1,51 +1,39 @@
-# 🔍 LLM Context Builder
+# 🔍 LLM Context Builder - Desktop Edition
 
-A tool for preparing code repositories for LLM analysis and modification. Create concise, properly formatted context from your projects that can be easily shared with LLMs.
+Application desktop pour préparer le contexte de vos projets de code pour l'analyse et la modification par LLM. Créez un contexte concis et bien formaté de vos projets, facilement partageable avec les LLMs.
 
-> 🛡️ **Security Feature**: Automatically detects and masks sensitive information like API keys, credentials, and tokens to prevent them from being shared with LLMs.
+> 🛡️ **Sécurité** : Détecte et masque automatiquement les informations sensibles comme les clés API, identifiants et tokens pour éviter leur partage accidentel avec les LLMs.
 
-## 🚀 Features
+## 🚀 Fonctionnalités Principales
 
-- **Smart Repository Scanning**: Recursively scans directories, automatically respects .gitignore rules
-- **Proper Formatting**: Creates neatly formatted code blocks with language detection
-- **Directory Tree Visualization**: Generates a visual tree structure of your project
-- **Web Interface**: Simple browser UI for selecting files and generating context
-- **CLI Support**: Command-line interface for automation and scripts
-- **Sensitive Data Protection**: Detects and masks API keys, passwords, tokens and other credentials
-- **Token Estimation**: Provides approximate token count for LLM context windows
-- **Developer Toolbox** (Desktop Mode): Advanced AI-powered development assistant with prompt library
+- **📁 Scan Intelligent** : Parcourt récursivement les répertoires en respectant automatiquement les règles .gitignore
+- **🎨 Formatage Optimal** : Crée des blocs de code avec détection automatique du langage
+- **🌳 Visualisation Arborescente** : Génère une représentation visuelle de la structure du projet
+- **💻 Interface Desktop Native** : Application autonome avec sélecteur de fichiers système
+- **🔐 Protection des Données Sensibles** : Détecte et masque les clés API, mots de passe, tokens et autres identifiants
+- **📊 Estimation des Tokens** : Fournit un nombre approximatif de tokens pour les fenêtres de contexte LLM
+- **🧰 Toolbox Développeur** : Assistant IA avancé avec bibliothèque de prompts pour le développement
 
-### Web Interface Features
+## 📸 Aperçu
 
-![image](https://github.com/user-attachments/assets/e2816992-9967-403a-b8d6-3df66e618a0e)
+![Interface principale](https://github.com/user-attachments/assets/e2816992-9967-403a-b8d6-3df66e618a0e)
 
-- **File Selection**: Interactively select files and folders from your chosen directory.
-- **.gitignore Integration**: Automatically respects `.gitignore` rules to exclude irrelevant files.
-- **Custom Instructions**: Add specific instructions to be appended to the end of the generated context, guiding the LLM on subsequent tasks.
-  - Includes buttons for quickly inserting predefined, configurable instruction templates.
-  - Smart insertion logic: appends to existing custom text, or replaces the last predefined instruction if one was just inserted.
-- **Context Regeneration**: Easily regenerate the context. If files have been modified, you'll be guided to re-select the directory to ensure all changes are captured, while your previous file selection is preserved.
-- **Secret Masking Toggle**: Enable or disable sensitive data masking directly from the UI.
-- **Copy to Clipboard**: Quickly copy the generated Markdown context.
-- **LLM Integration (Configurable)**:
-  - Send the generated context directly to a configured LLM API (OpenAI compatible or Ollama).
-  - View the LLM's response directly in the interface.
-  - Chat with the LLM with conversation history.
-  - LLM responses are rendered as Markdown in the chat.
-  - Quickly append predefined instructions (e.g., for generating patches) to your chat messages.
-  - Copy the LLM's response to the clipboard.
-  - Configuration via `config.ini` for API endpoint, key, model, API type, and streaming.
+### Interface Desktop
+
+- **Sélection Native** : Dialogue système pour choisir un répertoire local
+- **Arbre de Fichiers Interactif** : Sélectionnez/désélectionnez les fichiers à inclure
+- **Instructions Personnalisées** : Ajoutez des instructions spécifiques au contexte
+- **Masquage des Secrets** : Activez/désactivez la protection des données sensibles
+- **Copie Rapide** : Copiez le contexte généré dans le presse-papiers
 
 ## ⚙️ Installation
 
-### Requirements
+### Prérequis
 
 - Python 3.8+
-- Flask
-- pathspec
-- detect-secrets
+- Windows (pour l'exécution via `run.bat`)
 
-### Setup
+### Installation Rapide
 
 ```bash
 git clone https://github.com/Astral0/code-to-llm.git
@@ -53,291 +41,180 @@ cd code-to-llm
 pip install -r requirements.txt
 ```
 
-The web interface allows for configuration of predefined instruction templates and LLM server settings via a `config.ini` file at the root of the project. 
-Create `config.ini` from `config.ini.template` and customize it:
+### Configuration
+
+Créez `config.ini` à partir de `config.ini.template` et personnalisez-le :
 
 ```ini
 [Instructions]
-instruction1_text = Your first predefined instruction.
-instruction2_text = Your second predefined instruction.
+instruction1_text = Ne fais rien, attends mes instructions.
+instruction2_text = Si des modifications du code source sont nécessaires, présente ta réponse sous forme de patch Linux.
 
 [LLMServer]
-url = YOUR_LLM_API_URL_HERE # e.g., https://api.openai.com/v1/chat/completions or http://localhost:11434
-                             # For OpenAI, can be base 'https://api.openai.com' or full '.../v1/chat/completions'.
-                             # For Ollama, can be base 'http://host:port' or include '/api/chat' or '/v1/chat/completions'.
-apikey = YOUR_LLM_API_KEY_HERE # Optional for local Ollama, required for OpenAI
-model = YOUR_LLM_MODEL_HERE   # e.g., gpt-3.5-turbo or llama3
-api_type = openai             # 'openai' or 'ollama'
-enabled = false               # Set to true to enable LLM interaction features
-stream_response = false       # Set to true to enable streaming responses from the LLM
-
-[Tokens]
-
-[Git]
-# Path to git executable (optional - leave empty to use git from PATH)
-executable_path = 
+url = YOUR_LLM_API_URL_HERE      # ex: https://api.openai.com/v1 ou http://localhost:11434
+apikey = YOUR_LLM_API_KEY_HERE   # Optionnel pour Ollama local, requis pour OpenAI
+model = YOUR_LLM_MODEL_HERE      # ex: gpt-3.5-turbo ou llama3
+api_type = openai                # 'openai' ou 'ollama'
+enabled = true                   # Active l'intégration LLM
+stream_response = true           # Active le streaming des réponses
 ```
 
-### Web Interface
+## 🚀 Utilisation
+
+### Lancement de l'Application
+
+Double-cliquez sur `run.bat` ou exécutez :
 
 ```bash
-python web_server.py # Default port 5000
-# or specify a custom port, e.g., 8080
-python web_server.py --port 8080
+run.bat
 ```
 
-Then open http://127.0.0.1:5000 (or your custom port) in your browser.
+L'application s'ouvre dans une fenêtre native avec interface web intégrée.
 
-### Desktop Mode with Developer Toolbox
+### Workflow Type
 
-The Desktop Mode provides an enhanced experience with native file system access and the Developer Toolbox:
+1. **Sélectionner un Répertoire** : Cliquez sur "Sélectionner un répertoire" pour choisir votre projet
+2. **Scanner** : L'application analyse le répertoire en respectant .gitignore
+3. **Choisir les Fichiers** : Sélectionnez les fichiers à inclure dans le contexte
+4. **Générer le Contexte** : Créez le document Markdown formaté
+5. **Utiliser la Toolbox** : Ouvrez la Toolbox Développeur pour l'analyse IA
 
-```bash
-python main_desktop.py
-```
+## 🧰 Toolbox Développeur
 
-Features:
-- **Native Directory Selection**: Direct file system access without uploads
-- **Developer Toolbox**: AI-powered assistant for code analysis and development
-- **Prompt Library**: Pre-configured prompts for common development tasks
-- **Git Integration**: Analyze your recent changes with `git diff`
+La Toolbox est un assistant IA intégré offrant des fonctionnalités avancées :
 
-### Command Line
+### Modes Disponibles
 
-```bash
-python llm_context_builder.py cli path/to/your/project -o output.md
-```
+#### Mode API
+- Communication directe avec l'API LLM configurée
+- Historique de conversation local
+- Export des conversations
+- Compteur de tokens en temps réel
+- Support du streaming
 
-### CLI Options
+#### Mode Navigateur Intégré
+- Ouvre les sites de chatbot (ChatGPT, Gemini, Claude) dans une fenêtre pywebview
+- Navigation sécurisée au sein de l'application
+- Idéal pour utiliser des services web sans quitter l'application
 
-```bash
-# General
-python llm_context_builder.py cli <paths_to_scan...>
+### Prompts Prédéfinis
 
-# Output Configuration
-  -o, --output-file <file>    Specify the output file for the context. (Default: stdout)
-  --no-tree                   Disable the generation of the directory tree visualization.
-  --no-header                 Disable the standard context header.
-  --no-footer                 Disable the standard file footers (--- END FILE ---).
+Le répertoire `prompts/` contient des modèles optimisés :
 
-# Content Filtering & Handling
-  --repo-root <path>          Specify the project root if different from the scanned path.
-                              Used for more accurate relative paths in the context.
-  --exclude <pattern>         Specify additional glob patterns to exclude files/directories.
-                              Can be used multiple times. (e.g., --exclude "*.log" --exclude "temp/")
-  --include-binary            Include a short header of binary files instead of skipping them.
-  --max-size <size>           Maximum size for individual files (e.g., 1M, 500K). Files exceeding this
-                              will be truncated or skipped (behavior may vary).
-  --encoding <enc>            Specify encoding for reading files (e.g., utf-8, latin-1).
-                              (Default: utf-8 with error handling)
+1. **Analyse Générale** (`01_analyse_generale.md`)
+   - Revue complète de l'architecture
+   - Identification des points forts et axes d'amélioration
+   - Résumé de la stack technique
 
-# Security & Masking
-  --no-masking                Disable all sensitive data masking.
-  --masking-mode <mode>       Set masking mode: 'mask' (replace with placeholder, default) 
-                              or 'remove' (remove the line containing the secret).
+2. **Analyse de Sécurité** (`02_analyse_securite.md`)
+   - Audit de sécurité ciblé
+   - Évaluation des risques (Critique/Élevé/Moyen/Faible)
+   - Recommandations de sécurité
 
-# Instructions
-  --instructions "<text>"   Add custom instructions to the end of the generated context.
+3. **Planification de Fonctionnalité** (`03_plan_action_fonctionnalite.md`)
+   - Plans d'action détaillés
+   - Modifications de fichiers nécessaires
+   - Stratégie de test
 
-# Other
-  --debug                     Enable debug logging for verbose output.
-  --no-progress               Disable the progress bar during file processing.
-```
+4. **Revue de Code** (`04_revue_de_diff.md`)
+   - Intégration automatique de `git diff`
+   - Évaluation de la qualité
+   - Suggestions d'amélioration
 
-### Advanced Options
+### Personnalisation des Prompts
 
-```bash
-# Specify a custom repository root
-python llm_context_builder.py cli path/to/your/project -o output.md --repo-root /custom/root --debug
-
-# Start web server on a specific port
-python llm_context_builder.py serve --port 8080 --host 0.0.0.0
-```
-
-## 🛡️ Security Features
-
-### Sensitive Data Masking
-
-The tool automatically detects and masks sensitive information in your code, including:
-
-- API keys and tokens
-- Passwords and credentials
-- Private keys and certificates
-- Connection strings with embedded credentials
-- AWS keys and other cloud provider credentials
-
-When sensitive data is detected, it will be replaced with a masked indicator such as:
-
-```
-[LINE CONTAINING SENSITIVE DATA: ArtifactoryDetector]
-```
-
-Or, depending on the detection method and file type:
-```
-[LINE REMOVED DUE TO DETECTED SECRET]
-```
-Or sometimes simply, for very sensitive lines:
-```
-[LINE CONTAINING SENSITIVE DATA: some_pattern_name]
-```
-
-> **Note**: This masking helps prevent accidental leakage of sensitive information when sharing code context with LLMs. You can enable or disable this feature in the web interface.
-
-### Detection Methods
-
-The security scanning uses two complementary approaches:
-
-1. **detect-secrets library**: Uses a variety of detectors for different types of secrets
-2. **Custom regex patterns**: Additional patterns for common credential formats
-
-## 🧰 Developer Toolbox (Desktop Mode Only)
-
-The Developer Toolbox is an advanced AI-powered assistant integrated into the Desktop Mode. It provides a comprehensive set of tools for code analysis, development planning, and code review.
-
-### Available Prompts
-
-The toolbox includes pre-configured prompts in the `prompts/` directory:
-
-1. **General Analysis** (`01_analyse_generale.md`): Comprehensive project architecture review
-   - Architecture and structure analysis
-   - Identification of strengths and improvement areas
-   - Technical stack summary
-
-2. **Security Analysis** (`02_analyse_securite.md`): Security-focused code audit
-   - Vulnerability detection
-   - Risk assessment (Critical/High/Medium/Low)
-   - Security recommendations
-
-3. **Feature Planning** (`03_plan_action_fonctionnalite.md`): Detailed implementation planning
-   - Step-by-step action plans
-   - File modifications needed
-   - Testing strategy
-
-4. **Code Review** (`04_revue_de_diff.md`): Review of recent changes
-   - Automatic git diff integration
-   - Quality assessment
-   - Improvement suggestions
-
-### Using the Toolbox
-
-1. **Open the Toolbox**: Click "Open Developer Toolbox" button in Desktop Mode
-2. **Import Project Context**: Import the context from your main window
-3. **Select Prompts**: Choose from the prompt library or write custom queries
-4. **Git Integration**: Use "Analyze my recent changes" to review uncommitted work
-
-### Customizing Prompts
-
-You can add your own prompts by creating new `.md` files in the `prompts/` directory:
+Ajoutez vos propres prompts en créant des fichiers `.md` dans `prompts/` :
 
 ```markdown
-# prompts/05_custom_analysis.md
-Your custom prompt content here...
+# prompts/05_analyse_custom.md
+Votre prompt personnalisé ici...
 ```
 
-The toolbox will automatically detect and display new prompts.
+## 🛡️ Sécurité et Protection des Données
 
-## 🔄 Output Format
+### Masquage Automatique
 
-The generated context includes:
+L'outil détecte et masque automatiquement :
+- Clés API et tokens
+- Mots de passe et identifiants
+- Clés privées et certificats
+- Chaînes de connexion avec identifiants
+- Clés AWS et autres credentials cloud
 
-1. A header with project information
-2. A directory tree visualization
-3. The content of each file with language-specific formatting
-4. Custom instructions, if provided by the user
+Exemple de masquage :
+```
+[LINE CONTAINING SENSITIVE DATA: api_key]
+```
+
+### Méthodes de Détection
+
+1. **Bibliothèque detect-secrets** : Détecteurs spécialisés pour différents types de secrets
+2. **Patterns Regex personnalisés** : Motifs supplémentaires pour formats courants
+
+## 📋 Format de Sortie
+
+Le contexte généré inclut :
 
 ```
 --- START CONTEXT ---
-Objective: Provide the complete context of a project to enable an LLM to understand the code and apply user-requested modifications.
-Structure: First, the project's directory tree is presented, followed by the full content of each relevant file.
-Security Note: Sensitive information such as API keys, tokens, passwords, and credentials have been automatically masked in this context.
-...
+Objective: Provide the complete context of a project...
+Security Note: Sensitive information has been masked...
 
 --- START DIRECTORY TREE ---
 Project_Root/
 ├── src/
 │   ├── main.py
 │   └── utils.py
-├── tests/
-│   └── test_main.py
 └── README.md
 --- END DIRECTORY TREE ---
 
 --- START FILE: src/main.py ---
 ```python
-# Main application code
-...
+# Code content here
 ```
 --- END FILE: src/main.py ---
-
-...
---- INSTRUCTIONS ---
-Refactor the main_function to improve readability.
---- END INSTRUCTIONS ---
-
-## 💡 Tips for Using with LLMs
-
-- **Prompt Structure**: Provide the context followed by clear instructions about what modifications you need
-- **File References**: Refer to files using their exact paths as shown in the context
-- **Token Management**: For large projects, select only relevant files to stay within LLM context limits
-- **Security Check**: Always verify that sensitive data has been properly masked before sharing
-
-## 🤝 Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-## 📄 License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## Mode d'Emploi de l'Application
-
-### Mode Web (pour un environnement standard)
-
-Pour lancer l'application en mode web, suivez ces instructions :
-
-1.  Lancez le serveur Flask en exécutant la commande `python web_server.py`.
-2.  Ouvrez un navigateur web à l'adresse `http://127.0.0.1:5000`.
-3.  Le pilotage du navigateur externe se fait via des scripts Selenium séparés, comme dans le fonctionnement original.
-
-### Mode Bureau (pour un environnement restreint)
-
-Pour lancer l'application en mode bureau, suivez ces instructions :
-
-1.  Lancez l'application de bureau en exécutant le script `run_desktop.bat`.
-2.  Cela ouvrira une fenêtre d'application native affichant l'interface.
-3.  Le bouton "Démarrer la discussion avec le LLM" ouvrira une seconde fenêtre de navigateur pour l'automatisation.
-
-## Usage
-
-### Desktop Mode (Recommended for large projects)
-
-The desktop mode avoids file upload issues with large projects (React, Node.js with node_modules, etc.) by reading files directly from disk:
-
-```bash
-python main_desktop.py
 ```
 
-**Features:**
-- 🚀 **No file upload limit** - reads directly from disk
-- 📁 **Native directory picker** - system dialog for folder selection  
-- ⚡ **Pre-filtered scanning** - applies .gitignore rules before reading files
-- 💾 **Memory efficient** - processes files on-demand
-- 🔄 **Hybrid interface** - combines desktop APIs with web UI
+## 💡 Conseils d'Utilisation
 
-**Perfect for:**
-- Large React/Angular projects with node_modules
-- Monorepos with multiple packages
-- Projects with extensive build artifacts
-- Any project where file count > 10,000
+- **Sélection Ciblée** : Pour les gros projets, sélectionnez uniquement les fichiers pertinents
+- **Vérification Sécurité** : Toujours vérifier que les données sensibles sont masquées
+- **Gestion des Tokens** : Surveillez l'estimation pour rester dans les limites LLM
+- **Instructions Claires** : Ajoutez des instructions précises pour guider le LLM
 
-### Web Interface
+## 🔧 Configuration Avancée
 
-```bash
-python web_server.py # Default port 5000
-# or specify a custom port, e.g., 8080
-python web_server.py --port 8080
+### Exclusion de Fichiers
+
+Par défaut, l'application ignore :
+- `.git/`, `__pycache__/`, `.gitignore`
+- `.vscode/`, `.idea/`, `.kilocode/`, `.claude/`
+- Fichiers binaires et médias
+- Fichiers de lock (`package-lock.json`, etc.)
+
+Personnalisez via `config.ini` :
+```ini
+[FileExclusion]
+file_blacklist = .DS_Store, Thumbs.db
+pattern_blacklist = *.min.js, *.min.css, *-lock.json
 ```
 
-Then open http://127.0.0.1:5000 (or your custom port) in your browser.
+### Détection Binaire
 
-**Note:** Web mode has file upload limitations on large projects.
+```ini
+[BinaryDetection]
+extension_blacklist = .exe, .dll, .so, .pdf, .zip
+extension_whitelist = .py, .js, .html, .css, .json
+```
+
+## 🤝 Contribution
+
+Les contributions sont bienvenues ! N'hésitez pas à soumettre des Pull Requests.
+
+## 📄 Licence
+
+Ce projet est sous licence MIT - voir le fichier LICENSE pour plus de détails.
+
+## 🆘 Support
+
+Pour signaler des bugs ou demander des fonctionnalités, ouvrez une issue sur GitHub.
