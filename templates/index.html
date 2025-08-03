@@ -257,6 +257,79 @@
     </footer>
   </div>
   
+  <!-- Modal de sélection du mode Toolbox -->
+  <div class="modal fade" id="toolboxModeModal" tabindex="-1" aria-labelledby="toolboxModeModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="toolboxModeModalLabel">Choisir le mode de la Toolbox</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <div class="row">
+            <div class="col-md-6">
+              <div class="card h-100">
+                <div class="card-body">
+                  <h5 class="card-title text-primary">
+                    <i class="fas fa-server"></i> Mode API
+                  </h5>
+                  <p class="card-text">
+                    Interface de chat intégrée communiquant 
+                    directement avec l'API LLM configurée.
+                  </p>
+                  <ul class="list-unstyled text-success">
+                    <li><i class="fas fa-check"></i> Historique local</li>
+                    <li><i class="fas fa-check"></i> Export de conversation</li>
+                    <li><i class="fas fa-check"></i> Édition de messages</li>
+                    <li><i class="fas fa-check"></i> Compteur de tokens</li>
+                    <li><i class="fas fa-check"></i> Mode streaming</li>
+                  </ul>
+                  <button type="button" class="btn btn-primary w-100" 
+                          onclick="openToolboxMode('api')">
+                    <i class="fas fa-rocket"></i> Lancer en Mode API
+                  </button>
+                </div>
+              </div>
+            </div>
+            <div class="col-md-6">
+              <div class="card h-100">
+                <div class="card-body">
+                  <h5 class="card-title text-secondary">
+                    <i class="fas fa-globe"></i> Mode Navigateur
+                  </h5>
+                  <p class="card-text">
+                    Pilote automatiquement un site de chatbot 
+                    dans une fenêtre séparée.
+                  </p>
+                  <div class="mb-3">
+                    <label class="form-label">Service de chatbot :</label>
+                    <select id="browserTargetSelect" class="form-select">
+                      <option value="gemini">Google Gemini</option>
+                      <option value="chatgpt">ChatGPT</option>
+                      <option value="claude">Claude AI</option>
+                    </select>
+                  </div>
+                  <p class="text-warning small">
+                    <i class="fas fa-info-circle"></i> 
+                    L'historique est géré par le site externe
+                  </p>
+                  <p class="text-muted small">
+                    <i class="fas fa-exclamation-triangle"></i> 
+                    Nécessite d'être connecté au service choisi
+                  </p>
+                  <button type="button" class="btn btn-secondary w-100" 
+                          onclick="openToolboxMode('browser')">
+                    <i class="fas fa-window-restore"></i> Lancer en Mode Navigateur
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script>
   <script src="https://cdn.socket.io/4.5.4/socket.io.min.js" crossorigin="anonymous"></script> <!-- Socket.IO client depuis CDN -->
   <script src="{{ url_for('static', filename='script.js') }}"></script>

@@ -190,6 +190,19 @@
             50% { opacity: 1; }
             100% { opacity: 0.6; }
         }
+        
+        /* Styles pour le mode conditionnel */
+        body[data-mode="browser"] .api-mode-only {
+            display: none !important;
+        }
+        
+        body[data-mode="browser"] .browser-mode-only {
+            display: block !important;
+        }
+        
+        body[data-mode="api"] .browser-mode-only {
+            display: none !important;
+        }
     </style>
 </head>
 <body>
@@ -232,18 +245,37 @@
             <!-- Zone principale - Chat -->
             <div class="col-md-9">
                 <div class="chat-container">
-                    <div id="chatDisplayArea" class="chat-display">
+                    <!-- Zone de notification pour le mode navigateur -->
+                    <div id="browserModeNotification" class="browser-mode-only d-none p-4">
+                        <div class="alert alert-info">
+                            <h5><i class="fas fa-globe"></i> Mode Navigateur Actif</h5>
+                            <p class="mb-2">Les interactions avec les boutons de gauche piloteront automatiquement la fenêtre du chatbot.</p>
+                            <p class="mb-0 small">L'historique de conversation est géré par le site externe.</p>
+                        </div>
+                        <div id="browserStatusIndicator" class="mt-3 text-center">
+                            <span class="badge bg-success"><i class="fas fa-link"></i> Connecté</span>
+                            <span id="browserUrl" class="text-muted small ms-2"></span>
+                        </div>
+                        
+                        <!-- Zone pour les messages et erreurs en mode navigateur -->
+                        <div id="browserMessages" class="mt-3">
+                            <div id="llm-error-browser" class="alert alert-danger p-2 d-none mb-3" role="alert" style="font-size: 0.9em;"></div>
+                        </div>
+                    </div>
+                    
+                    <div id="chatDisplayArea" class="chat-display api-mode-only">
                         <div class="message-bubble system">
                             <i class="fas fa-info-circle"></i> Bienvenue dans la Toolbox Développeur ! 
                             Commencez par importer le contexte de votre projet, puis utilisez les prompts pour analyser votre code.
                         </div>
                     </div>
 
-                    <div class="chat-input-area">
+                    <!-- Zone de saisie pour le mode API uniquement -->
+                    <div class="chat-input-area api-mode-only">
                         <div id="llm-error-chat" class="alert alert-danger p-2 d-none mb-3" role="alert" style="font-size: 0.9em;"></div>
                         
                         <div class="d-flex justify-content-between align-items-center mb-2">
-                            <div id="chat-info-bar" class="text-muted small">
+                            <div id="chat-info-bar" class="text-muted small api-mode-only">
                                 Tokens de la conversation : <span id="chat-token-count" class="fw-bold">0</span>
                             </div>
                         </div>
@@ -261,10 +293,10 @@
                         </div>
                         
                         <div class="mt-2 text-end">
-                            <button class="btn btn-sm btn-outline-success me-2" type="button" id="exportChatBtn" title="Exporter la conversation">
+                            <button class="btn btn-sm btn-outline-success me-2 api-mode-only" type="button" id="exportChatBtn" title="Exporter la conversation">
                                 <i class="fas fa-file-export"></i> Exporter
                             </button>
-                            <button class="btn btn-sm btn-outline-secondary" type="button" id="clearChatBtn" title="Effacer la conversation">
+                            <button class="btn btn-sm btn-outline-secondary api-mode-only" type="button" id="clearChatBtn" title="Effacer la conversation">
                                 <i class="fas fa-eraser"></i> Effacer la conversation
                             </button>
                         </div>

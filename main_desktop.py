@@ -250,6 +250,30 @@ class Api:
             logging.error(error_msg)
             return {'success': False, 'error': error_msg}
     
+    def check_browser_status(self):
+        """Vérifie si la fenêtre navigateur est active"""
+        if not self._browser_window:
+            return {'active': False, 'error': 'Aucune fenêtre navigateur ouverte'}
+        
+        # Vérifier si la fenêtre a été détruite
+        if hasattr(self._browser_window, 'destroyed') and self._browser_window.destroyed:
+            self._browser_window = None
+            self.driver = None
+            return {'active': False, 'error': 'La fenêtre navigateur a été fermée'}
+        
+        try:
+            # Vérifier que le driver peut encore communiquer avec la fenêtre
+            if self.driver:
+                url = self.driver.get_current_url()
+                return {'active': True, 'url': url}
+            else:
+                return {'active': False, 'error': 'Driver non initialisé'}
+        except Exception as e:
+            # Si une erreur survient, la fenêtre est probablement fermée
+            self._browser_window = None
+            self.driver = None
+            return {'active': False, 'error': f'Erreur de communication avec le navigateur: {str(e)}'}
+    
     def send_context(self, context):
         """Envoie le contexte au navigateur pywebview"""
         if not (self.driver and self._browser_window):
@@ -627,10 +651,44 @@ class Api:
         tree_lines.append("```")
         return tree_lines
     
-    def open_toolbox_window(self):
-        """Ouvre une nouvelle fenêtre pour la Toolbox Développeur"""
+    def open_toolbox_window(self, mode='api', target_url=None):
+        """
+        Ouvre une nouvelle fenêtre pour la Toolbox Développeur
+        mode: 'api' ou 'browser'
+        target_url: 'gemini', 'chatgpt' ou 'claude' pour le mode browser
+        """
         try:
-            logging.info("Ouverture de la fenêtre Toolbox Développeur")
+            logging.info(f"Ouverture de la fenêtre Toolbox Développeur en mode {mode}")
+            
+            # En mode browser, s'assurer que la fenêtre navigateur est ouverte
+            if mode == 'browser':
+                if not self._browser_window or (hasattr(self._browser_window, 'destroyed') and self._browser_window.destroyed):
+                    # Déterminer l'URL selon target_url
+                    urls = {
+                        'gemini': 'https://gemini.google.com',
+                        'chatgpt': 'https://chat.openai.com',
+                        'claude': 'https://claude.ai/chat'
+                    }
+                    browser_url = urls.get(target_url, urls['gemini'])
+                    
+                    logging.info(f"Création de la fenêtre navigateur pour {target_url} - URL: {browser_url}")
+                    
+                    # Créer la fenêtre navigateur
+                    self._browser_window = webview.create_window(
+                        f"Navigateur - {target_url.title() if target_url else 'Chatbot'}",
+                        browser_url,
+                        width=1200,
+                        height=800,
+                        x=100,  # Position décalée
+                        y=100
+                    )
+                    
+                    # Initialiser le driver
+                    self.driver = PywebviewDriver(self._browser_window)
+                    
+                    # Attendre que la fenêtre soit prête
+                    import time
+                    time.sleep(2)
             
             # Créer la fenêtre Toolbox
             self._toolbox_window = webview.create_window(
@@ -639,10 +697,26 @@ class Api:
                 js_api=self,  # Partager la même API
                 width=1400,
                 height=800,
-                min_size=(1200, 600)
+                min_size=(1200, 600),
+                x=200,  # Position légèrement décalée
+                y=150
             )
             
-            return {'success': True, 'message': 'Fenêtre Toolbox ouverte avec succès'}
+            # Passer le mode au JavaScript une fois chargé
+            def on_toolbox_loaded():
+                js_code = f"""
+                    window.toolboxMode = '{mode}';
+                    window.toolboxTarget = '{target_url or ''}';
+                    if (window.initializeToolboxMode) {{
+                        window.initializeToolboxMode();
+                    }}
+                """
+                self._toolbox_window.evaluate_js(js_code)
+                logging.info(f"Mode {mode} injecté dans la fenêtre Toolbox")
+            
+            self._toolbox_window.events.loaded += on_toolbox_loaded
+            
+            return {'success': True, 'message': f'Fenêtre Toolbox ouverte avec succès en mode {mode}'}
             
         except Exception as e:
             error_msg = f"Erreur lors de l'ouverture de la Toolbox: {str(e)}"

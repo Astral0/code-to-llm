@@ -1349,13 +1349,10 @@ document.addEventListener('DOMContentLoaded', () => {
             console.log("DEBUG: Clic sur startLlmChatBtn. window.pywebview existe?", !!window.pywebview);
             
             if (window.pywebview) {
-                // Mode Bureau - Ouvrir la nouvelle fenêtre Toolbox
-                console.log("Mode Bureau détecté. Appel de pywebview.api.open_toolbox_window()");
-                if (window.pywebview.api && window.pywebview.api.open_toolbox_window) {
-                    window.pywebview.api.open_toolbox_window();
-                } else {
-                    console.error("La fonction open_toolbox_window n'est pas disponible dans l'API");
-                }
+                // Mode Bureau - Ouvrir la modale de sélection du mode
+                console.log("Mode Bureau détecté. Ouverture de la modale de sélection");
+                const modal = new bootstrap.Modal(document.getElementById('toolboxModeModal'));
+                modal.show();
                 // En mode Desktop, le bouton reste visible pour permettre de rouvrir la Toolbox
             } else {
                 // Mode Web - Cacher le bouton en mode Web car la fonctionnalité n'est pas disponible
@@ -1364,6 +1361,37 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
     }
+    
+    // Fonction pour ouvrir la Toolbox dans le mode choisi
+    window.openToolboxMode = async function(mode) {
+        const modal = bootstrap.Modal.getInstance(document.getElementById('toolboxModeModal'));
+        if (modal) {
+            modal.hide();
+        }
+        
+        try {
+            let target_url = null;
+            if (mode === 'browser') {
+                target_url = document.getElementById('browserTargetSelect').value;
+            }
+            
+            console.log(`Ouverture de la Toolbox en mode ${mode} avec target ${target_url}`);
+            
+            if (window.pywebview && window.pywebview.api && window.pywebview.api.open_toolbox_window) {
+                const response = await window.pywebview.api.open_toolbox_window(mode, target_url);
+                
+                if (!response.success) {
+                    showError(indexError, response.error || 'Erreur lors de l\'ouverture de la Toolbox');
+                }
+            } else {
+                console.error("La fonction open_toolbox_window n'est pas disponible dans l'API");
+                showError(indexError, 'API non disponible pour ouvrir la Toolbox');
+            }
+        } catch (error) {
+            console.error('Erreur lors de l\'ouverture de la Toolbox:', error);
+            showError(indexError, 'Erreur lors de l\'ouverture de la Toolbox: ' + error.message);
+        }
+    };
 
     // Fonction pour restaurer le bouton en mode Desktop si il a été caché par erreur
     function ensureDesktopButtonVisibility() {
