@@ -683,13 +683,31 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- Logique pour les nouvelles cases à cocher de sélection rapide ---
 
     function isDevFile(filePath) {
+        // Fichiers qui doivent rester cochés par défaut
+        const alwaysCheckedFiles = [
+            'config.ini.template',
+            'README.md',
+            'readme.md',
+            'INSTALLATION.md'
+        ];
+        
+        // Vérifier si le fichier doit toujours être coché
+        if (alwaysCheckedFiles.some(file => filePath.endsWith(file))) {
+            return false;
+        }
+        
+        // Extensions qui doivent rester cochées par défaut
+        if (filePath.endsWith('.sh') || filePath.endsWith('.bat')) {
+            return false;
+        }
+        
         const devPatterns = [
             // Fichiers de dépendances et config
             'requirements.txt', 'requirements-dev.txt', 'pyproject.toml', 'package.json', 'pnpm-lock.yaml',
             // Fichiers de config
-            '.gitignore', '.dockerignore', '.editorconfig', 'config.ini', 'config.ini.template',
-            // Scripts
-            '.sh', '.bat', '.ps1',
+            '.gitignore', '.dockerignore', '.editorconfig', 'config.ini',
+            // Scripts (retirés car on veut qu'ils soient cochés)
+            '.ps1',
             // CI/CD
             'Dockerfile', 'docker-compose.yml', '.github/', '.gitlab-ci.yml',
             // Documentation et licence
