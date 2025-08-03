@@ -6,7 +6,6 @@ import json
 import appdirs
 import configparser
 import logging
-import re
 # Enum local pour remplacer selenium.By
 class By:
     ID = "id"
@@ -17,11 +16,11 @@ class By:
     XPATH = "xpath"
 from pywebview_driver import PywebviewDriver
 from web_server import app
-import pathspec
-from pathspec.patterns import GitWildMatchPattern
-from pathlib import Path
-import fnmatch
 from services.export_service import ExportService
+from services.git_service import GitService
+from services.llm_api_service import LlmApiService
+from services.file_service import FileService
+from services.context_builder_service import ContextBuilderService
 
 # Définir le chemin de stockage des données persistantes
 DATA_DIR = appdirs.user_data_dir('WebAutomationDesktop', 'WebAutomationTools')
@@ -86,6 +85,41 @@ def load_config():
 # Charger la configuration
 CONFIG = load_config()
 
+# Charger les configurations spécifiques aux services
+def load_service_configs():
+    """Charge les configurations spécifiques pour chaque service"""
+    config = configparser.ConfigParser()
+    config_path = 'config.ini'
+    
+    service_configs = {
+        'file_service': CONFIG.copy(),  # FileService utilise la config globale
+        'git_service': {},  # GitService utilise seulement le chemin git
+        'llm_service': {}   # LlmApiService aura sa propre config
+    }
+    
+    if os.path.exists(config_path):
+        config.read(config_path, encoding='utf-8')
+        
+        # Configuration Git
+        if 'Git' in config:
+            service_configs['git_service']['executable_path'] = config.get('Git', 'executable_path', fallback='git')
+        
+        # Configuration LLM
+        if 'LLMServer' in config:
+            service_configs['llm_service'] = {
+                'enabled': config.getboolean('LLMServer', 'enabled', fallback=False),
+                'url': config.get('LLMServer', 'url', fallback=''),
+                'apikey': config.get('LLMServer', 'apikey', fallback=''),
+                'model': config.get('LLMServer', 'model', fallback=''),
+                'api_type': config.get('LLMServer', 'api_type', fallback='openai').lower(),
+                'ssl_verify': config.getboolean('LLMServer', 'ssl_verify', fallback=True),
+                'stream_response': config.getboolean('LLMServer', 'stream_response', fallback=False)
+            }
+    
+    return service_configs
+
+SERVICE_CONFIGS = load_service_configs()
+
 # Configurer les logs selon le paramètre debug
 if CONFIG['debug']:
     logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -98,6 +132,12 @@ class Api:
     def __init__(self):
         self._main_window = None
         self._browser_window = None
+        
+        # Initialisation des services avec leurs configurations spécifiques
+        self.git_service = GitService(SERVICE_CONFIGS['git_service'])
+        self.llm_service = LlmApiService(SERVICE_CONFIGS['llm_service'])
+        self.file_service = FileService(SERVICE_CONFIGS['file_service'])
+        self.context_builder = ContextBuilderService({})
         self._toolbox_window = None
         self.driver = None
         self.current_directory = None
@@ -367,296 +407,56 @@ class Api:
     
     def scan_local_directory(self, directory_path):
         """Scanne un répertoire local et applique les règles .gitignore sans upload"""
-        try:
-            if not directory_path or not os.path.exists(directory_path):
-                error_msg = f"Répertoire invalide: {directory_path}"
-                logging.error(error_msg)
-                return {'success': False, 'error': error_msg}
-            
-            self.current_directory = directory_path
-            logging.info(f"Début du scan local du répertoire: {directory_path}")
-            
-            # Charger les règles .gitignore
-            gitignore_spec = self._load_gitignore_spec(directory_path)
-            
-            # Scanner les fichiers
-            scanned_files = self._scan_files_with_gitignore(directory_path, gitignore_spec)
-            
-            # Filtrer les fichiers binaires
-            filtered_files = self._filter_binary_files(scanned_files)
-            
-            # Mettre en cache les fichiers pour un accès rapide
-            self.file_cache = filtered_files
-            
-            # Préparer la structure pour l'affichage
-            file_tree_data = [{"path": f["relative_path"], "size": f["size"]} for f in filtered_files]
-            
-            logging.info(f"Scan terminé: {len(filtered_files)} fichiers trouvés")
-            
-            return {
-                'success': True,
-                'files': file_tree_data,
-                'directory': directory_path,
-                'total_files': len(filtered_files),
-                'debug': {
-                    'gitignore_patterns_count': len(gitignore_spec.patterns) if gitignore_spec else 0
-                }
-            }
-            
-        except Exception as e:
-            error_msg = f"Erreur lors du scan du répertoire: {str(e)}"
-            logging.error(error_msg)
-            return {'success': False, 'error': error_msg}
-    
-    def _load_gitignore_spec(self, directory_path):
-        """Charge les règles .gitignore depuis le répertoire"""
-        try:
-            gitignore_path = os.path.join(directory_path, '.gitignore')
-            patterns = ['.git/', '__pycache__/', 'node_modules/', '.vscode/', '.idea/']
-            
-            if os.path.exists(gitignore_path):
-                with open(gitignore_path, 'r', encoding='utf-8', errors='ignore') as f:
-                    lines = f.readlines()
-                    
-                # Nettoyer les lignes
-                cleaned_lines = [
-                    line.strip() for line in lines 
-                    if line.strip() and not line.strip().startswith('#')
-                ]
-                patterns.extend(cleaned_lines)
-                logging.info(f"Chargé {len(cleaned_lines)} règles depuis .gitignore")
-            else:
-                logging.info("Aucun .gitignore trouvé, utilisation des règles par défaut")
-            
-            return pathspec.PathSpec.from_lines(GitWildMatchPattern, patterns)
-            
-        except Exception as e:
-            logging.warning(f"Erreur lors du chargement de .gitignore: {e}")
-            # Retourner un spec avec seulement les règles par défaut
-            default_patterns = ['.git/', '__pycache__/', 'node_modules/', '.vscode/', '.idea/']
-            return pathspec.PathSpec.from_lines(GitWildMatchPattern, default_patterns)
-    
-    def _scan_files_with_gitignore(self, directory_path, gitignore_spec):
-        """Scanne récursivement les fichiers en appliquant les règles gitignore"""
-        scanned_files = []
-        directory_path = Path(directory_path)
-        
-        try:
-            for file_path in directory_path.rglob('*'):
-                if file_path.is_file():
-                    try:
-                        # Calculer le chemin relatif
-                        relative_path = file_path.relative_to(directory_path).as_posix()
-                        
-                        # Vérifier si le fichier est ignoré
-                        if not gitignore_spec.match_file(relative_path):
-                            file_size = file_path.stat().st_size
-                            scanned_files.append({
-                                'absolute_path': str(file_path),
-                                'relative_path': relative_path,
-                                'name': file_path.name,
-                                'size': file_size
-                            })
-                            
-                            if CONFIG['debug'] and len(scanned_files) % 1000 == 0:
-                                logging.debug(f"Scanné {len(scanned_files)} fichiers...")
-                                
-                    except Exception as file_error:
-                        logging.warning(f"Erreur lors du traitement de {file_path}: {file_error}")
-                        continue
-                        
-        except Exception as e:
-            logging.error(f"Erreur lors du scan récursif: {e}")
-            
-        return scanned_files
-    
-    def _filter_binary_files(self, files):
-        """Filtre les fichiers binaires basé sur l'extension et le contenu"""
-        filtered_files = []
-        
-        for file_info in files:
-            file_path = Path(file_info['absolute_path'])
-            ext = file_path.suffix.lower()
-            filename = file_path.name
-            
-            # Vérifier d'abord les exclusions de fichiers spécifiques
-            if filename in CONFIG['file_blacklist']:
-                if CONFIG['debug']:
-                    logging.debug(f"Ignoré (fichier dans la blacklist): {file_info['relative_path']}")
-                continue
-            
-            # Vérifier les patterns d'exclusion
-            excluded_by_pattern = False
-            for pattern in CONFIG['pattern_blacklist']:
-                if fnmatch.fnmatch(filename, pattern):
-                    if CONFIG['debug']:
-                        logging.debug(f"Ignoré (correspond au pattern '{pattern}'): {file_info['relative_path']}")
-                    excluded_by_pattern = True
-                    break
-            
-            if excluded_by_pattern:
-                continue
-            
-            # Niveau 1: Liste Noire d'extensions (Rejet Immédiat)
-            if ext in CONFIG['binary_blacklist']:
-                if CONFIG['debug']:
-                    logging.debug(f"Ignoré (binaire par extension): {file_info['relative_path']}")
-                continue
-            
-            # Niveau 2: Liste Blanche d'extensions (Acceptation Immédiate)
-            if ext in CONFIG['binary_whitelist']:
-                filtered_files.append(file_info)
-                continue
-            
-            # Niveau 3: Vérifier le contenu pour les petits fichiers
-            try:
-                if file_info['size'] < 1024 * 1024:  # Moins de 1MB
-                    with open(file_path, 'rb') as f:
-                        sample = f.read(1024)
-                        # Si plus de 30% de bytes non-ASCII, considérer comme binaire
-                        non_ascii_count = sum(1 for b in sample if b > 127 or (b < 32 and b not in [9, 10, 13]))
-                        if len(sample) > 0 and (non_ascii_count / len(sample)) > 0.3:
-                            if CONFIG['debug']:
-                                logging.debug(f"Ignoré (binaire par contenu): {file_info['relative_path']}")
-                            continue
-            except Exception:
-                # En cas d'erreur de lecture, ignorer le fichier
-                if CONFIG['debug']:
-                    logging.debug(f"Ignoré (erreur de lecture): {file_info['relative_path']}")
-                continue
-                
-            filtered_files.append(file_info)
-        
-        return filtered_files
+        result = self.file_service.scan_local_directory(directory_path)
+        if result.get('success'):
+            self.current_directory = result.get('directory')
+            self.file_cache = result.get('file_cache', [])
+            return result.get('response_for_frontend')
+        else:
+            return {'success': False, 'error': result.get('error', 'Erreur inconnue')}
     
     def get_file_content(self, relative_path):
         """Récupère le contenu d'un fichier depuis le cache local"""
-        try:
-            if not self.current_directory:
-                return {'success': False, 'error': 'Aucun répertoire scanné'}
-            
-            # Trouver le fichier dans le cache
-            file_info = next((f for f in self.file_cache if f['relative_path'] == relative_path), None)
-            
-            if not file_info:
-                return {'success': False, 'error': f'Fichier non trouvé: {relative_path}'}
-            
-            # Lire le contenu
-            with open(file_info['absolute_path'], 'r', encoding='utf-8', errors='ignore') as f:
-                content = f.read()
-            
-            return {
-                'success': True,
-                'content': content,
-                'path': relative_path,
-                'size': file_info['size']
-            }
-            
-        except Exception as e:
-            error_msg = f"Erreur lors de la lecture du fichier {relative_path}: {str(e)}"
-            logging.error(error_msg)
-            return {'success': False, 'error': error_msg}
+        return self.file_service.get_file_content(relative_path, self.current_directory, self.file_cache)
     
     def generate_context_from_selection(self, selected_files, instructions=""):
         """Génère le contexte depuis une sélection de fichiers locaux"""
-        try:
-            if not selected_files:
-                return {'success': False, 'error': 'Aucun fichier sélectionné'}
-            
-            context_parts = []
-            total_chars = 0
-            successful_files = 0
-            
-            # En-tête du contexte
-            context_parts.append(f"# Contexte du projet - {os.path.basename(self.current_directory)}")
-            context_parts.append(f"Répertoire: {self.current_directory}")
-            context_parts.append(f"Fichiers inclus: {len(selected_files)}")
-            context_parts.append("")
-            
-            # Générer l'arbre des fichiers
-            tree_lines = self._generate_file_tree(selected_files)
-            context_parts.extend(tree_lines)
-            context_parts.append("")
-            
-            # Ajouter le contenu de chaque fichier et stocker les infos de taille
-            file_contents = []
-            for file_path in selected_files:
-                file_result = self.get_file_content(file_path)
-                if file_result['success']:
-                    content = file_result['content']
-                    size = len(content)
-                    
-                    # Stocker pour le tri par taille
-                    file_contents.append({
-                        'path': file_path,
-                        'content': content,
-                        'size': size
-                    })
-                    
-                    context_parts.append(f"--- {file_path} ---")
-                    context_parts.append(content)
-                    context_parts.append(f"--- FIN {file_path} ---")
-                    context_parts.append("")
-                    total_chars += size
-                    successful_files += 1
-                else:
-                    logging.warning(f"Échec lecture fichier: {file_path}")
-            
-            if instructions:
-                context_parts.append("--- INSTRUCTIONS ---")
-                context_parts.append(instructions)
-                context_parts.append("--- FIN INSTRUCTIONS ---")
-                context_parts.append("")
-            
-            context = "\n".join(context_parts)
-            
+        # Étape 1: Récupérer les contenus des fichiers
+        file_result = self.file_service.get_file_contents_batch(
+            selected_files,
+            self.current_directory,
+            self.file_cache
+        )
+        
+        if not file_result.get('success'):
+            return file_result
+        
+        # Étape 2: Construire le contexte avec le ContextBuilderService
+        context_result = self.context_builder.build_context(
+            project_name=os.path.basename(self.current_directory),
+            directory_path=self.current_directory,
+            file_contents=file_result['file_contents'],
+            instructions=instructions
+        )
+        
+        if context_result.get('success'):
             # Stocker le contexte pour la Toolbox
-            self._last_generated_context = context
+            self._last_generated_context = context_result['context']
             
-            # Trier les fichiers par taille et prendre les 10 plus gros
-            largest_files = sorted(file_contents, key=lambda f: f['size'], reverse=True)[:10]
-            formatted_largest_files = [{'path': f['path'], 'size': f['size']} for f in largest_files]
-            
+            # Rendre le format compatible avec l'ancien format attendu par le frontend
             return {
                 'success': True,
-                'context': context,
+                'context': context_result['context'],
                 'stats': {
-                    'total_files': successful_files,
-                    'total_chars': total_chars,
-                    'estimated_tokens': total_chars // 4,  # Estimation approximative
-                    'largest_files': formatted_largest_files  # NOUVELLE DONNÉE
+                    'total_files': context_result['stats']['files_count'],
+                    'total_chars': context_result['stats']['total_chars'],
+                    'estimated_tokens': context_result['stats']['estimated_tokens'],
+                    'largest_files': []  # Géré dans le contexte maintenant
                 }
             }
-            
-        except Exception as e:
-            error_msg = f"Erreur lors de la génération du contexte: {str(e)}"
-            logging.error(error_msg)
-            return {'success': False, 'error': error_msg}
+        else:
+            return context_result
     
-    def _generate_file_tree(self, selected_files):
-        """Génère un arbre visuel des fichiers sélectionnés"""
-        if not selected_files:
-            return ["## Arbre des fichiers", "Aucun fichier sélectionné"]
-        
-        tree_lines = ["## Arbre des fichiers", "```"]
-        tree_lines.append(f"{os.path.basename(self.current_directory)}/")
-        
-        # Trier les fichiers pour un affichage cohérent
-        sorted_files = sorted(selected_files)
-        
-        # Construire l'arbre
-        for i, file_path in enumerate(sorted_files):
-            is_last = (i == len(sorted_files) - 1)
-            parts = file_path.split('/')
-            
-            # Construire l'indentation
-            prefix = "└── " if is_last else "├── "
-            indent = "    " * (len(parts) - 1)
-            
-            tree_lines.append(f"{indent}{prefix}{parts[-1]}")
-        
-        tree_lines.append("```")
-        return tree_lines
     
     def open_toolbox_window(self, mode='api', target_url=None):
         """
@@ -788,56 +588,14 @@ class Api:
     
     def run_git_diff(self):
         """Exécute git diff HEAD et retourne le résultat"""
+        if not self.current_directory:
+            return {'error': 'Aucun répertoire de travail sélectionné'}
+        
         try:
-            import subprocess
-            
-            # Lire la configuration pour le chemin git
-            config = configparser.ConfigParser()
-            config.read('config.ini', encoding='utf-8')
-            git_path = config.get('Git', 'executable_path', fallback='git').strip()
-            
-            if not git_path:
-                git_path = 'git'
-            
-            # Vérifier que nous sommes dans le répertoire de travail
-            if not self.current_directory:
-                return {'error': 'Aucun répertoire de travail sélectionné'}
-            
-            # Construire la commande
-            git_command = [git_path, 'diff', 'HEAD']
-            logging.info(f"Exécution de la commande: {' '.join(git_command)}")
-            logging.info(f"Dans le répertoire: {self.current_directory}")
-            
-            # Exécuter git diff HEAD
-            result = subprocess.run(
-                git_command,
-                cwd=self.current_directory,
-                capture_output=True,
-                text=True,
-                encoding='utf-8'
-            )
-            
-            if result.returncode != 0:
-                # Vérifier si c'est parce que ce n'est pas un repo git
-                if "not a git repository" in result.stderr.lower():
-                    logging.warning(f"Le répertoire {self.current_directory} n'est pas un dépôt git")
-                    return {'error': 'Le répertoire actuel n\'est pas un dépôt git'}
-                else:
-                    logging.error(f"Erreur git: {result.stderr}")
-                    return {'error': f'Erreur git: {result.stderr}'}
-            
-            diff_size = len(result.stdout)
-            diff_lines = result.stdout.count('\n')
-            logging.info(f"Git diff exécuté avec succès: {diff_size} caractères, {diff_lines} lignes")
-            
-            return {'diff': result.stdout}
-            
-        except FileNotFoundError:
-            return {'error': 'Git n\'est pas installé ou le chemin est incorrect. Vérifiez config.ini'}
+            return self.git_service.run_git_diff(self.current_directory)
         except Exception as e:
-            error_msg = f"Erreur lors de l'exécution de git diff: {str(e)}"
-            logging.error(error_msg)
-            return {'error': error_msg}
+            logging.error(f"Erreur lors de l'exécution de git diff: {str(e)}")
+            return {'error': str(e)}
     
     def get_main_context(self):
         """Retourne le contexte principal généré précédemment"""
@@ -854,332 +612,52 @@ class Api:
         except:
             return False
     
-    def _count_tokens_for_history(self, chat_history):
-        """Compte le nombre total de tokens dans l'historique du chat"""
-        try:
-            # Utiliser une approximation locale sans dépendance externe
-            # Basée sur les observations de tokenization GPT/Claude
-            total_tokens = 0
-            
-            for message in chat_history:
-                content = message.get('content', '')
-                role = message.get('role', '')
-                
-                # Compter les tokens du contenu
-                content_tokens = self._estimate_tokens(content)
-                
-                # Ajouter le surcoût pour le rôle et la structure
-                # Format typique: {"role": "user", "content": "..."} = ~5-7 tokens de structure
-                role_tokens = len(role.split()) + 5
-                
-                total_tokens += content_tokens + role_tokens
-            
-            # Ajouter un surcoût pour la structure globale de la conversation
-            total_tokens += 3
-            
-            logging.debug(f"Tokens estimés: {total_tokens} pour {len(chat_history)} messages")
-            return total_tokens
-            
-        except Exception as e:
-            logging.error(f"Erreur lors du comptage des tokens: {e}")
-            # En cas d'erreur, retourner une estimation très basique
-            total_chars = sum(len(msg.get('content', '')) for msg in chat_history)
-            return total_chars // 4
-    
-    def _estimate_tokens(self, text):
-        """Estime le nombre de tokens dans un texte donné"""
-        if not text:
-            return 0
-        
-        # Approximation basée sur l'analyse des patterns de tokenization GPT/Claude
-        # 1. Compter les mots (séparés par espaces)
-        words = text.split()
-        word_count = len(words)
-        
-        # 2. Compter les caractères de ponctuation qui deviennent souvent des tokens séparés
-        punctuation_count = len(re.findall(r'[.,!?;:()\[\]{}"\'`\-–—…]', text))
-        
-        # 3. Compter les nombres (souvent tokenizés différemment)
-        number_sequences = re.findall(r'\d+', text)
-        number_tokens = sum(len(num) // 3 + 1 for num in number_sequences)
-        
-        # 4. Compter les retours à la ligne (souvent des tokens séparés)
-        newline_count = text.count('\n')
-        
-        # 5. Gérer les mots longs (souvent divisés en sous-tokens)
-        long_words = [w for w in words if len(w) > 10]
-        extra_tokens_from_long_words = sum(len(w) // 8 for w in long_words)
-        
-        # 6. Gérer le code (variables, syntaxe)
-        # Détecter si c'est du code par la présence de patterns communs
-        code_indicators = ['def ', 'function ', 'import ', 'const ', 'let ', 'var ', '{}', '()', '[]', '=>', '//']
-        is_code = any(indicator in text for indicator in code_indicators)
-        code_multiplier = 1.3 if is_code else 1.0
-        
-        # Calcul final avec pondération
-        # Base: 1 token par mot, ajusté selon les observations
-        base_tokens = word_count * 1.1  # Les mots courts font souvent 1 token, les longs plus
-        
-        total_tokens = int((
-            base_tokens + 
-            punctuation_count * 0.8 +  # Pas toute la ponctuation devient un token séparé
-            number_tokens +
-            newline_count +
-            extra_tokens_from_long_words
-        ) * code_multiplier)
-        
-        # Minimum de tokens (même une chaîne vide prend au moins 1 token)
-        return max(1, total_tokens)
     
     def send_to_llm_stream(self, chat_history, callback_id):
         """Envoie l'historique au LLM en mode streaming avec callback vers le frontend"""
         logging.info(f"send_to_llm_stream appelé avec callback_id: {callback_id}")
-        try:
-            import requests
-            import json
-            
-            # Lire la configuration LLM
-            config = configparser.ConfigParser()
-            config.read('config.ini', encoding='utf-8')
-            
-            if not config.getboolean('LLMServer', 'enabled', fallback=False):
-                return {'error': 'LLM feature is not enabled in config.ini'}
-            
-            llm_url = config.get('LLMServer', 'url', fallback='')
-            llm_apikey = config.get('LLMServer', 'apikey', fallback='')
-            llm_model = config.get('LLMServer', 'model', fallback='')
-            llm_api_type = config.get('LLMServer', 'api_type', fallback='openai').lower()
-            ssl_verify = config.getboolean('LLMServer', 'ssl_verify', fallback=True)
-            
-            if not llm_url or not llm_model:
-                return {'error': 'LLM server configuration is incomplete in config.ini'}
-            
-            headers = {"Content-Type": "application/json"}
-            if llm_apikey:
-                headers["Authorization"] = f"Bearer {llm_apikey}"
-            
-            if llm_api_type == "openai":
-                payload = {
-                    "model": llm_model,
-                    "messages": chat_history,
-                    "stream": True
-                }
-                target_url = llm_url.rstrip('/') 
-                if not target_url.endswith('/chat/completions'):
-                    target_url += '/chat/completions' if '/v1' in target_url else '/v1/chat/completions'
-            else:  # ollama
-                prompt = "\n\n".join([f"{msg['role'].upper()}: {msg['content']}" for msg in chat_history])
-                payload = {
-                    "model": llm_model,
-                    "prompt": prompt,
-                    "stream": True
-                }
-                target_url = llm_url.rstrip('/') + "/api/generate"
-            
-            logging.info(f"Sending streaming request to LLM at {target_url}")
-            logging.info(f"Toolbox window exists: {self._toolbox_window is not None}")
-            
-            if not ssl_verify:
-                import urllib3
-                urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-            
-            response = requests.post(target_url, headers=headers, json=payload, stream=True, verify=ssl_verify)
-            response.raise_for_status()
-            
-            full_response = ""
-            chunk_count = 0
-            
-            # Envoyer un callback pour démarrer le streaming
+        
+        # Créer les callbacks pour gérer l'interaction avec la fenêtre
+        def on_start():
             if self._toolbox_window:
                 logging.info(f"Envoi de onStreamStart pour {callback_id}")
                 self._toolbox_window.evaluate_js(f'window.onStreamStart && window.onStreamStart("{callback_id}")')
-            
-            for line in response.iter_lines():
-                if line:
-                    line_str = line.decode('utf-8')
-                    
-                    if llm_api_type == "openai":
-                        if line_str.startswith("data: "):
-                            if line_str.strip() == "data: [DONE]":
-                                break
-                            try:
-                                json_data = json.loads(line_str[6:])
-                                if 'choices' in json_data and len(json_data['choices']) > 0:
-                                    delta = json_data['choices'][0].get('delta', {})
-                                    if 'content' in delta:
-                                        chunk = delta['content']
-                                        full_response += chunk
-                                        # Envoyer le chunk au frontend
-                                        if self._toolbox_window:
-                                            chunk_count += 1
-                                            if chunk_count % 10 == 1:  # Log tous les 10 chunks
-                                                logging.info(f"Envoi du chunk {chunk_count}: {chunk[:20]}...")
-                                            escaped_chunk = chunk.replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n')
-                                            self._toolbox_window.evaluate_js(f'window.onStreamChunk && window.onStreamChunk("{callback_id}", "{escaped_chunk}")')
-                            except json.JSONDecodeError:
-                                continue
-                    else:  # ollama
-                        try:
-                            json_data = json.loads(line_str)
-                            if 'response' in json_data:
-                                chunk = json_data['response']
-                                full_response += chunk
-                                # Envoyer le chunk au frontend
-                                if self._toolbox_window:
-                                    escaped_chunk = chunk.replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n')
-                                    self._toolbox_window.evaluate_js(f'window.onStreamChunk && window.onStreamChunk("{callback_id}", "{escaped_chunk}")')
-                                
-                                if json_data.get('done', False):
-                                    break
-                        except json.JSONDecodeError:
-                            continue
-            
-            # Créer l'historique final et compter les tokens
-            final_history = chat_history + [{'role': 'assistant', 'content': full_response}]
-            total_tokens = self._count_tokens_for_history(final_history)
-            
-            # Envoyer la fin du streaming avec le comptage de tokens
-            logging.info(f"Streaming terminé, {chunk_count} chunks envoyés, taille totale: {len(full_response)}, tokens: {total_tokens}")
+        
+        def on_chunk(chunk):
+            if self._toolbox_window:
+                escaped_chunk = chunk.replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n')
+                self._toolbox_window.evaluate_js(f'window.onStreamChunk && window.onStreamChunk("{callback_id}", "{escaped_chunk}")')
+        
+        def on_end(total_tokens):
             if self._toolbox_window:
                 logging.info(f"Envoi de onStreamEnd pour {callback_id} avec {total_tokens} tokens")
                 self._toolbox_window.evaluate_js(f'window.onStreamEnd && window.onStreamEnd("{callback_id}", {total_tokens})')
-            
-            return {'response': full_response, 'total_tokens': total_tokens}
-            
-        except Exception as e:
-            error_msg = f"Erreur lors du streaming: {str(e)}"
-            logging.error(error_msg)
-            # Envoyer l'erreur au frontend
+        
+        def on_error(error_msg):
             if self._toolbox_window:
                 escaped_error = error_msg.replace('\\', '\\\\').replace('"', '\\"')
                 self._toolbox_window.evaluate_js(f'window.onStreamError && window.onStreamError("{callback_id}", "{escaped_error}")')
-            return {'error': error_msg}
+        
+        try:
+            return self.llm_service.send_to_llm_stream(
+                chat_history, 
+                on_start=on_start,
+                on_chunk=on_chunk,
+                on_end=on_end,
+                on_error=on_error
+            )
+        except Exception as e:
+            logging.error(f"Erreur lors de l'appel au LLM en streaming: {str(e)}")
+            on_error(str(e))
+            return {'error': str(e)}
     
     def send_to_llm(self, chat_history, stream=False):
         """Envoie l'historique du chat au LLM et retourne la réponse"""
         try:
-            import requests
-            import json
-            
-            # Lire la configuration LLM
-            config = configparser.ConfigParser()
-            config.read('config.ini', encoding='utf-8')
-            
-            if not config.getboolean('LLMServer', 'enabled', fallback=False):
-                return {'error': 'LLM feature is not enabled in config.ini'}
-            
-            llm_url = config.get('LLMServer', 'url', fallback='')
-            llm_apikey = config.get('LLMServer', 'apikey', fallback='')
-            llm_model = config.get('LLMServer', 'model', fallback='')
-            llm_api_type = config.get('LLMServer', 'api_type', fallback='openai').lower()
-            ssl_verify = config.getboolean('LLMServer', 'ssl_verify', fallback=True)
-            
-            if not llm_url or not llm_model:
-                return {'error': 'LLM server configuration is incomplete in config.ini'}
-            
-            headers = {"Content-Type": "application/json"}
-            if llm_apikey:
-                headers["Authorization"] = f"Bearer {llm_apikey}"
-            
-            if llm_api_type == "openai":
-                payload = {
-                    "model": llm_model,
-                    "messages": chat_history,
-                    "stream": stream
-                }
-                target_url = llm_url.rstrip('/') 
-                if not target_url.endswith('/chat/completions'):
-                    target_url += '/chat/completions' if '/v1' in target_url else '/v1/chat/completions'
-            else:  # ollama
-                prompt = "\n\n".join([f"{msg['role'].upper()}: {msg['content']}" for msg in chat_history])
-                payload = {
-                    "model": llm_model,
-                    "prompt": prompt,
-                    "stream": stream
-                }
-                target_url = llm_url.rstrip('/') + "/api/generate"
-            
-            logging.info(f"Sending request to LLM at {target_url} (SSL verify: {ssl_verify})")
-            
-            if not ssl_verify:
-                # Désactiver la vérification SSL pour les environnements d'entreprise
-                # ATTENTION : Ceci réduit la sécurité, à utiliser uniquement en environnement contrôlé
-                import urllib3
-                urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-                logging.warning("SSL certificate verification is disabled - use with caution!")
-            
-            response = requests.post(target_url, headers=headers, json=payload, stream=stream, verify=ssl_verify)
-            response.raise_for_status()
-            
-            if stream:
-                # Pour le streaming, collecter toute la réponse
-                full_response = ""
-                try:
-                    for line in response.iter_lines():
-                        if line:
-                            line_str = line.decode('utf-8')
-                            
-                            if llm_api_type == "openai":
-                                # Format OpenAI : data: {...}
-                                if line_str.startswith("data: "):
-                                    if line_str.strip() == "data: [DONE]":
-                                        break
-                                    try:
-                                        json_data = json.loads(line_str[6:])
-                                        if 'choices' in json_data and len(json_data['choices']) > 0:
-                                            delta = json_data['choices'][0].get('delta', {})
-                                            if 'content' in delta:
-                                                full_response += delta['content']
-                                    except json.JSONDecodeError:
-                                        continue
-                            else:  # ollama
-                                # Format Ollama : ligne JSON directe
-                                try:
-                                    json_data = json.loads(line_str)
-                                    if 'response' in json_data:
-                                        full_response += json_data['response']
-                                        
-                                        # Vérifier si c'est le dernier message
-                                        if json_data.get('done', False):
-                                            break
-                                except json.JSONDecodeError:
-                                    continue
-                    
-                    # Créer l'historique final et compter les tokens
-                    final_history = chat_history + [{'role': 'assistant', 'content': full_response}]
-                    total_tokens = self._count_tokens_for_history(final_history)
-                    
-                    return {'response': full_response, 'total_tokens': total_tokens}
-                except Exception as e:
-                    logging.error(f"Erreur lors du streaming: {e}")
-                    return {'error': f"Erreur lors du streaming: {str(e)}"}
-            else:
-                if llm_api_type == "openai":
-                    result = response.json()
-                    assistant_message = result['choices'][0]['message']['content']
-                else:  # ollama
-                    result = response.json()
-                    assistant_message = result.get('response', '')
-                
-                # Créer l'historique final et compter les tokens
-                final_history = chat_history + [{'role': 'assistant', 'content': assistant_message}]
-                total_tokens = self._count_tokens_for_history(final_history)
-                
-                return {'response': assistant_message, 'total_tokens': total_tokens}
-                
-        except requests.exceptions.HTTPError as http_err:
-            error_msg = f"HTTP error: {http_err}"
-            try:
-                error_details = http_err.response.json()
-                error_msg += f" - Details: {error_details}"
-            except:
-                pass
-            logging.error(error_msg)
-            return {'error': error_msg}
+            return self.llm_service.send_to_llm(chat_history, stream)
         except Exception as e:
-            error_msg = f"Erreur lors de la communication avec le LLM: {str(e)}"
-            logging.error(error_msg)
-            return {'error': error_msg}
+            logging.error(f"Erreur lors de l'appel au LLM: {str(e)}")
+            return {'error': str(e)}
 
     def save_conversation_dialog(self, chat_data):
         """Ouvre une boîte de dialogue pour sauvegarder la conversation"""
