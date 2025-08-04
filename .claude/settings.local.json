@@ -3,7 +3,11 @@
     "allow": [
       "Bash(mkdir:*)",
       "Bash(grep:*)",
-      "Bash(dir prompts)"
+      "Bash(dir prompts)",
+      "Bash(git checkout:*)",
+      "Bash(del run_serve.bat)",
+      "Bash(git add:*)",
+      "Bash(git rm:*)"
     ],
     "deny": []
   }
