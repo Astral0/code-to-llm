@@ -75,6 +75,17 @@ class FileService(BaseService):
             # Préparer la structure pour l'affichage
             file_tree_data = [{"path": f["relative_path"], "size": f["size"]} for f in filtered_files]
             
+            # Calculer les fichiers les plus volumineux (top 10)
+            largest_files = sorted(filtered_files, key=lambda f: f['size'], reverse=True)[:10]
+            largest_files_data = [
+                {
+                    "path": f["relative_path"],
+                    "size": f["size"],
+                    "size_kb": round(f["size"] / 1024, 1)
+                }
+                for f in largest_files
+            ]
+            
             self.logger.info(f"Scan terminé: {len(filtered_files)} fichiers trouvés")
             
             # Mettre à jour l'état interne
@@ -91,6 +102,7 @@ class FileService(BaseService):
                     'count': len(filtered_files),
                     'directory': directory_path,
                     'total_files': len(filtered_files),
+                    'largest_files': largest_files_data,  # NOUVELLE DONNÉE
                     'debug': {
                         'gitignore_patterns_count': len(gitignore_spec.patterns) if hasattr(gitignore_spec, 'patterns') else 0
                     }

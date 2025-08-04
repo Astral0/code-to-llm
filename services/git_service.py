@@ -26,7 +26,7 @@ class GitService(BaseService):
     
     def run_git_diff(self, directory_path: str) -> Dict[str, Any]:
         """
-        Exécute git diff HEAD dans le répertoire spécifié.
+        Exécute git diff --staged dans le répertoire spécifié.
         
         Args:
             directory_path: Le répertoire où exécuter git diff
@@ -40,14 +40,25 @@ class GitService(BaseService):
         try:
             # Vérifier que le répertoire est fourni
             if not directory_path:
+                self.logger.error("Aucun répertoire de travail spécifié")
                 return {'error': 'Aucun répertoire de travail spécifié'}
             
+            # Vérifier que le répertoire existe
+            import os
+            if not os.path.exists(directory_path):
+                self.logger.error(f"Le répertoire n'existe pas: {directory_path}")
+                return {'error': f"Le répertoire n'existe pas: {directory_path}"}
+            
             # Construire la commande
-            git_command = [self._git_path, 'diff', 'HEAD']
+            git_command = [self._git_path, 'diff', '--staged']
+            print(f"=== DÉBUT DEBUG GIT DIFF ===")
+            print(f"Exécution de la commande: {' '.join(git_command)}")
+            print(f"Dans le répertoire: {directory_path}")
+            print(f"Git path utilisé: {self._git_path}")
             self.logger.info(f"Exécution de la commande: {' '.join(git_command)}")
             self.logger.info(f"Dans le répertoire: {directory_path}")
             
-            # Exécuter git diff HEAD
+            # Exécuter git diff
             result = subprocess.run(
                 git_command,
                 cwd=directory_path,
@@ -67,7 +78,47 @@ class GitService(BaseService):
             
             diff_size = len(result.stdout)
             diff_lines = result.stdout.count('\n')
+            print(f"Retour de git diff: returncode={result.returncode}")
+            print(f"Stdout: {diff_size} caractères, {diff_lines} lignes")
+            print(f"Stderr: {result.stderr}")
             self.logger.info(f"Git diff exécuté avec succès: {diff_size} caractères, {diff_lines} lignes")
+            
+            # Debug: afficher les 200 premiers caractères du diff
+            if result.stdout:
+                preview = result.stdout[:200] + '...' if len(result.stdout) > 200 else result.stdout
+                self.logger.info(f"Aperçu du diff: {preview}")
+            else:
+                self.logger.warning("Le diff est vide!")
+                
+                # Exécuter git status pour comprendre l'état
+                status_command = [self._git_path, 'status', '--porcelain']
+                print(f"Exécution de git status pour debug: {' '.join(status_command)}")
+                status_result = subprocess.run(
+                    status_command,
+                    cwd=directory_path,
+                    capture_output=True,
+                    text=True,
+                    encoding='utf-8'
+                )
+                print(f"Git status returncode: {status_result.returncode}")
+                print(f"Git status stdout:\n{status_result.stdout}")
+                print(f"Git status stderr: {status_result.stderr}")
+                
+                # Vérifier s'il y a des fichiers stagés
+                staged_command = [self._git_path, 'diff', '--staged', '--name-only']
+                print(f"Vérification des fichiers stagés: {' '.join(staged_command)}")
+                staged_result = subprocess.run(
+                    staged_command,
+                    cwd=directory_path,
+                    capture_output=True,
+                    text=True,
+                    encoding='utf-8'
+                )
+                print(f"Fichiers stagés returncode: {staged_result.returncode}")
+                print(f"Fichiers stagés:\n{staged_result.stdout}")
+                print(f"Fichiers stagés stderr: {staged_result.stderr}")
+            
+            print(f"=== FIN DEBUG GIT DIFF ===")
             
             return {'diff': result.stdout}
             

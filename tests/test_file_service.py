@@ -66,6 +66,8 @@ class TestFileService:
         assert len(result['file_cache']) == 2
         assert result['response_for_frontend']['success'] == True
         assert result['response_for_frontend']['count'] == 2
+        assert 'largest_files' in result['response_for_frontend']
+        assert len(result['response_for_frontend']['largest_files']) == 2  # Seulement 2 fichiers dans le mock
     
     def test_get_file_content_no_directory(self, file_service):
         """Test sans répertoire spécifié."""

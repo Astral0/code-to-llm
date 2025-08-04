@@ -785,16 +785,22 @@ class ToolboxController {
                         console.log('Prompt avec git diff détecté');
                         // Prompt nécessitant git diff
                         const diffResult = await window.pywebview.api.run_git_diff();
+                        console.log('Résultat de run_git_diff:', diffResult);
                         
                         if (diffResult.error) {
+                            console.error('Erreur git diff:', diffResult.error);
                             this.showError(diffResult.error);
                             button.classList.remove('active');
                             button.disabled = false;
                             return;
                         }
                         
+                        console.log('Diff brut:', diffResult.diff);
+                        console.log('Longueur du diff:', diffResult.diff ? diffResult.diff.length : 0);
+                        console.log('Diff vide?', !diffResult.diff || diffResult.diff.trim() === '');
+                        
                         if (!diffResult.diff || diffResult.diff.trim() === '') {
-                            this.appendSystemMessage('Aucune modification détectée (git diff HEAD est vide).');
+                            this.appendSystemMessage('Aucune modification détectée (git diff --staged est vide).');
                             button.classList.remove('active');
                             button.disabled = false;
                             return;
@@ -858,7 +864,7 @@ class ToolboxController {
                             }
                             
                             if (!diffResult.diff || diffResult.diff.trim() === '') {
-                                this.appendSystemMessage('Aucune modification détectée (git diff HEAD est vide).');
+                                this.appendSystemMessage('Aucune modification détectée (git diff --staged est vide).');
                                 this.activePrompts.delete(promptFile);
                                 button.classList.remove('active');
                                 return;
@@ -899,15 +905,21 @@ class ToolboxController {
             this.hideError();
             
             if (window.pywebview && window.pywebview.api) {
+                console.log('Appel de run_git_diff...');
                 const diffResult = await window.pywebview.api.run_git_diff();
+                console.log('Résultat complet de run_git_diff:', JSON.stringify(diffResult));
                 
                 if (diffResult.error) {
+                    console.error('Erreur git diff:', diffResult.error);
                     this.showError(diffResult.error);
                     return;
                 }
                 
+                console.log('Diff brut:', diffResult.diff);
+                console.log('Longueur du diff:', diffResult.diff ? diffResult.diff.length : 0);
+                
                 if (!diffResult.diff || diffResult.diff.trim() === '') {
-                    this.appendSystemMessage('Aucune modification détectée (git diff HEAD est vide).');
+                    this.appendSystemMessage('Aucune modification détectée (git diff --staged est vide).');
                     return;
                 }
                 

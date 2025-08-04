@@ -164,11 +164,8 @@ class ContextBuilderService(BaseService):
             f"- Taille totale: {total_chars:,} caractères"
         ]
         
-        if largest_files:
-            stats.append(f"\n### Fichiers les plus volumineux:")
-            for i, file_data in enumerate(largest_files):
-                size_kb = file_data['size'] / 1024
-                stats.append(f"{i+1}. {file_data['path']} ({size_kb:.1f} KB)")
+        # La liste des fichiers volumineux est maintenant dans l'interface,
+        # pas dans le contexte généré
         
         return stats
     

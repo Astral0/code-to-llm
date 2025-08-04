@@ -30,7 +30,7 @@ class TestGitService:
     
     @patch('subprocess.run')
     def test_run_git_diff_success(self, mock_run, git_service):
-        """Test d'exécution réussie de git diff."""
+        """Test d'exécution réussie de git diff --staged."""
         # Mock la réponse de subprocess
         mock_result = MagicMock()
         mock_result.returncode = 0
@@ -43,9 +43,9 @@ class TestGitService:
         assert result['success'] == True
         assert result['diff'] == "diff --git a/file.py b/file.py\n+added line"
         
-        # Vérifier l'appel subprocess
+        # Vérifier l'appel subprocess avec --staged
         mock_run.assert_called_once_with(
-            ['git', 'diff', 'HEAD'],
+            ['git', 'diff', '--staged'],
             cwd='/path/to/repo',
             capture_output=True,
             text=True,

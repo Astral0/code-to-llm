@@ -443,15 +443,34 @@ class Api:
             # Stocker le contexte pour la Toolbox
             self._last_generated_context = context_result['context']
             
+            # Calculer les statistiques complètes pour le frontend
+            file_contents = file_result['file_contents']
+            
+            # Calculer le nombre total de lignes
+            total_lines = sum(content['content'].count('\n') + 1 for content in file_contents)
+            
+            # Trier les fichiers par taille et prendre les 10 plus gros
+            largest_files = sorted(file_contents, key=lambda f: f['size'], reverse=True)[:10]
+            formatted_largest_files = [{'path': f['path'], 'size': f['size']} for f in largest_files]
+            
+            # Obtenir le nombre total de fichiers scannés (avant sélection)
+            total_scanned_files = len(self.file_cache) if self.file_cache else len(selected_files)
+            included_count = len(selected_files)
+            
             # Rendre le format compatible avec l'ancien format attendu par le frontend
             return {
                 'success': True,
                 'context': context_result['context'],
                 'stats': {
-                    'total_files': context_result['stats']['files_count'],
+                    'total_files': total_scanned_files,
+                    'included_files_count': included_count,
+                    'excluded_files_count': total_scanned_files - included_count,
+                    'total_lines': total_lines,
                     'total_chars': context_result['stats']['total_chars'],
                     'estimated_tokens': context_result['stats']['estimated_tokens'],
-                    'largest_files': []  # Géré dans le contexte maintenant
+                    'largest_files': formatted_largest_files,
+                    'secrets_masked': 0,  # Le masquage n'est pas implémenté en local
+                    'files_with_secrets': []
                 }
             }
         else:
@@ -587,12 +606,28 @@ class Api:
             raise Exception(error_msg)
     
     def run_git_diff(self):
-        """Exécute git diff HEAD et retourne le résultat"""
+        """Exécute git diff --staged et retourne le résultat"""
+        print("=== APPEL run_git_diff ===")
+        print(f"Répertoire actuel: {self.current_directory}")
+        logging.info("=== APPEL run_git_diff ===")
+        logging.info(f"Répertoire actuel: {self.current_directory}")
+        
         if not self.current_directory:
+            logging.error("Aucun répertoire de travail sélectionné")
             return {'error': 'Aucun répertoire de travail sélectionné'}
         
         try:
-            return self.git_service.run_git_diff(self.current_directory)
+            result = self.git_service.run_git_diff(self.current_directory)
+            print(f"Résultat de git_service.run_git_diff: {result.keys()}")
+            if 'diff' in result:
+                print(f"Taille du diff: {len(result['diff'])} caractères")
+                if result['diff']:
+                    print(f"Début du diff: {result['diff'][:100]}...")
+                else:
+                    print("Le diff est vide")
+            if 'error' in result:
+                print(f"Erreur retournée: {result['error']}")
+            return result
         except Exception as e:
             logging.error(f"Erreur lors de l'exécution de git diff: {str(e)}")
             return {'error': str(e)}

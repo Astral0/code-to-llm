@@ -357,6 +357,12 @@ document.addEventListener('DOMContentLoaded', () => {
                     showElement(fileSelectionSection);
                     showElement(generationSection);
                     
+                    // Si on est en mode régénération, réafficher aussi le panneau de résultats
+                    if (isRegeneratingFlowActive) {
+                        showElement(resultAndChatArea);
+                        isRegeneratingFlowActive = false; // Réinitialiser le flag
+                    }
+                    
                     // Afficher les statistiques
                     const noteDiv = document.createElement('div');
                     noteDiv.className = 'alert alert-success mt-3';
@@ -869,7 +875,17 @@ document.addEventListener('DOMContentLoaded', () => {
                 const result = await pywebview.api.generate_context_from_selection(selectedFiles, instructions);
                 
                 if (result.success) {
-                    displayResults(result.context, result.stats);
+                    // Afficher le contexte dans la zone de texte
+                    document.getElementById('markdownOutput').textContent = result.context;
+                    
+                    // Utiliser updateSummaryPanel pour afficher TOUS les panneaux de résumé
+                    updateSummaryPanel(result.stats);
+                    
+                    // Gérer les boutons
+                    hideElement(generateBtn);
+                    showElement(regenerateBtn);
+                    
+                    // Afficher la zone de résultats
                     showElement(resultAndChatArea);
                     
                     if (!resultAndChatArea.classList.contains('d-none')) {
@@ -885,7 +901,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 showError(generateError, `Erreur lors de la génération: ${error.message}`, generationSection);
             } finally {
                 hideSpinner(generateSpinner);
-                showElement(generateBtn);
+                // Retirer l'ancien showElement(generateBtn) car il est géré dans le bloc if
             }
             
         } else {

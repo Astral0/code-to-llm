@@ -106,6 +106,15 @@ def format_data(data):
         assert 'binary.exe' not in file_paths
         assert '__pycache__/main.cpython-39.pyc' not in file_paths
         
+        # Vérifier la liste des fichiers volumineux
+        assert 'largest_files' in response
+        largest_files = response['largest_files']
+        assert isinstance(largest_files, list)
+        if largest_files:  # Si des fichiers sont présents
+            assert 'path' in largest_files[0]
+            assert 'size' in largest_files[0]
+            assert 'size_kb' in largest_files[0]
+        
         # Vérifier le cache interne
         assert hasattr(api_instance.file_service, 'file_cache')
         assert len(api_instance.file_service.file_cache) > 0
