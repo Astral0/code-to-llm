@@ -14,6 +14,7 @@ api_type = openai # Can be 'openai' or 'ollama'
 enabled = false
 stream_response = true
 ssl_verify = true # Set to false to disable SSL certificate verification (use with caution)
+timeout_seconds = 300 # Timeout in seconds for LLM API requests (default: 300)
 
 [SummarizerLLM]
 # LLM pour le RESUME du code (compression "lossy")

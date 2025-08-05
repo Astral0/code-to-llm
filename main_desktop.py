@@ -113,7 +113,8 @@ def load_service_configs():
                 'model': config.get('LLMServer', 'model', fallback=''),
                 'api_type': config.get('LLMServer', 'api_type', fallback='openai').lower(),
                 'ssl_verify': config.getboolean('LLMServer', 'ssl_verify', fallback=True),
-                'stream_response': config.getboolean('LLMServer', 'stream_response', fallback=False)
+                'stream_response': config.getboolean('LLMServer', 'stream_response', fallback=False),
+                'timeout_seconds': config.getint('LLMServer', 'timeout_seconds', fallback=300)
             }
     
     return service_configs

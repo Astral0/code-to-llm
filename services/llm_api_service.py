@@ -118,7 +118,7 @@ class LlmApiService(BaseService):
                 headers=headers,
                 json=payload,
                 verify=ssl_verify,
-                timeout=30
+                timeout=self._llm_config.get('timeout_seconds', 300)
             )
             
             # Gérer les erreurs HTTP
@@ -191,7 +191,7 @@ class LlmApiService(BaseService):
                 json=payload,
                 verify=ssl_verify,
                 stream=True,
-                timeout=30
+                timeout=self._llm_config.get('timeout_seconds', 300)
             )
             
             # Gérer les erreurs HTTP
