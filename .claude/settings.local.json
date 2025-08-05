@@ -7,7 +7,10 @@
       "Bash(git checkout:*)",
       "Bash(del run_serve.bat)",
       "Bash(git add:*)",
-      "Bash(git rm:*)"
+      "Bash(git rm:*)",
+      "Bash(for file in main_desktop.py services/export_service.py)",
+      "Bash(do echo \"=== $file ===\")",
+      "Bash(done)"
     ],
     "deny": []
   }

@@ -6,6 +6,7 @@ import json
 import appdirs
 import configparser
 import logging
+from pathlib import Path
 # Enum local pour remplacer selenium.By
 class By:
     ID = "id"
