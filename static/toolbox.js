@@ -138,6 +138,8 @@ class ToolboxController {
         this.isStreamEnabled = false;
         this.smartScrollController = null;
         this.conversationSummary = '';
+        this.currentConversationId = null;
+        this.conversations = [];
         
         // Initialiser le provider selon le mode
         this.initializeProvider();
@@ -147,6 +149,9 @@ class ToolboxController {
         
         // Vérifier le streaming
         this.checkStreamingStatus();
+        
+        // Charger la liste des conversations
+        this.loadConversations();
     }
     
     initializeProvider() {
@@ -725,6 +730,313 @@ class ToolboxController {
         }
     }
     
+    async loadConversations() {
+        console.log('Loading conversations...');
+        if (this.mode === 'api' && window.pywebview && window.pywebview.api) {
+            try {
+                const conversations = await window.pywebview.api.get_conversations();
+                console.log('Conversations loaded:', conversations);
+                this.conversations = conversations;
+                this.displayConversations();
+            } catch (error) {
+                console.error('Erreur lors du chargement des conversations:', error);
+            }
+        } else {
+            console.log('Conditions not met for loading conversations:', {
+                mode: this.mode,
+                pywebview: !!window.pywebview,
+                api: !!(window.pywebview && window.pywebview.api)
+            });
+        }
+    }
+    
+    displayConversations() {
+        const conversationsList = document.getElementById('conversationsList');
+        if (!conversationsList) return;
+        
+        conversationsList.innerHTML = '';
+        
+        if (this.conversations.length === 0) {
+            conversationsList.innerHTML = '<div class="text-muted small">Aucune conversation sauvegardée</div>';
+            return;
+        }
+        
+        this.conversations.forEach(conv => {
+            const convDiv = document.createElement('div');
+            convDiv.className = 'conversation-item';
+            if (conv.id === this.currentConversationId) {
+                convDiv.classList.add('active');
+            }
+            
+            // Icône de verrouillage interactive
+            let lockIcon = '';
+            if (conv.isLockedByMe) {
+                lockIcon = '<i class="fas fa-lock-open lock-icon locked-by-me" title="Verrouillée par vous"></i>';
+            } else if (conv.isLocked) {
+                lockIcon = `<button class="btn btn-sm btn-link p-0 lock-icon-btn" 
+                                onclick="window.toolboxController.forceReleaseLock('${conv.id}')" 
+                                title="Verrouillée par ${conv.lockInfo}. Cliquez pour forcer le déverrouillage.">
+                                <i class="fas fa-lock lock-icon locked-by-other"></i>
+                            </button>`;
+            }
+            
+            // Formater la date
+            const date = new Date(conv.updatedAt);
+            const dateStr = date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+            
+            convDiv.innerHTML = `
+                <div class="conversation-header">
+                    ${lockIcon}
+                    <div class="title" onclick="window.toolboxController.renameConversation('${conv.id}', '${conv.title ? conv.title.replace(/'/g, "\\'") : ''}')">${conv.title || 'Sans titre'}</div>
+                </div>
+                <div class="meta">${dateStr}</div>
+                <div class="conversation-actions">
+                    <button class="btn btn-sm btn-outline-primary" onclick="window.toolboxController.loadConversation('${conv.id}')" ${conv.isLocked && !conv.isLockedByMe ? 'disabled' : ''}>
+                        <i class="fas fa-folder-open"></i> Charger
+                    </button>
+                    <button class="btn btn-sm btn-outline-info" onclick="window.toolboxController.duplicateConversation('${conv.id}')">
+                        <i class="fas fa-copy"></i>
+                    </button>
+                    <button class="btn btn-sm btn-outline-danger" onclick="window.toolboxController.deleteConversation('${conv.id}')" ${conv.isLocked && !conv.isLockedByMe ? 'disabled' : ''}>
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </div>
+            `;
+            
+            conversationsList.appendChild(convDiv);
+        });
+    }
+    
+    async saveCurrentConversation() {
+        if (this.mode !== 'api' || !window.pywebview || !window.pywebview.api) return;
+        
+        const title = prompt('Titre de la conversation:', this.conversationSummary || 'Nouvelle conversation');
+        if (!title) return;
+        
+        // Nettoyer le titre : enlever les sauts de ligne et limiter la longueur
+        const cleanTitle = title.replace(/[\r\n]+/g, ' ').trim().substring(0, 100);
+        
+        const conversationData = {
+            id: this.currentConversationId,
+            title: cleanTitle,
+            history: this.chatHistory,
+            context: {
+                fullContext: this.mainContext,
+                metadata: {
+                    projectPath: window.toolboxProjectPath || '',
+                    filesIncluded: 0,
+                    estimatedTokens: this.estimateTokens(this.mainContext)
+                }
+            },
+            metadata: {
+                mode: 'api',
+                tags: []
+            }
+        };
+        
+        try {
+            const result = await window.pywebview.api.save_conversation(conversationData);
+            if (result.success) {
+                this.currentConversationId = result.id;
+                this.appendMessageToChat('system', `Conversation sauvegardée: ${result.title}`);
+                await this.loadConversations();
+            } else {
+                this.showError(`Erreur lors de la sauvegarde: ${result.error}`);
+            }
+        } catch (error) {
+            this.showError(`Erreur lors de la sauvegarde: ${error}`);
+        }
+    }
+    
+    async loadConversation(conversationId) {
+        if (this.mode !== 'api' || !window.pywebview || !window.pywebview.api) return;
+        
+        try {
+            const conversation = await window.pywebview.api.get_conversation_details(conversationId);
+            if (conversation) {
+                // Sauvegarder la conversation actuelle si elle a des modifications
+                if (this.currentConversationId && this.chatHistory.length > 0) {
+                    if (confirm('Voulez-vous sauvegarder la conversation actuelle avant de charger une nouvelle ?')) {
+                        await this.saveCurrentConversation();
+                    }
+                }
+                
+                // Charger la nouvelle conversation
+                this.currentConversationId = conversationId;
+                this.chatHistory = conversation.history || [];
+                this.mainContext = conversation.context?.fullContext || '';
+                this.conversationSummary = conversation.title || '';
+                
+                // Mettre à jour l'affichage
+                this.refreshChatDisplay();
+                this.updateContextStatus(!!this.mainContext);
+                this.displayConversations();
+                
+                this.appendMessageToChat('system', `Conversation "${conversation.title}" chargée`);
+            }
+        } catch (error) {
+            this.showError(`Erreur lors du chargement: ${error}`);
+        }
+    }
+    
+    async duplicateConversation(conversationId) {
+        if (this.mode !== 'api' || !window.pywebview || !window.pywebview.api) return;
+        
+        try {
+            const result = await window.pywebview.api.duplicate_conversation(conversationId);
+            if (result.success) {
+                this.appendMessageToChat('system', `Conversation dupliquée: ${result.title}`);
+                await this.loadConversations();
+            } else {
+                this.showError(`Erreur lors de la duplication: ${result.error}`);
+            }
+        } catch (error) {
+            this.showError(`Erreur lors de la duplication: ${error}`);
+        }
+    }
+    
+    async deleteConversation(conversationId) {
+        if (this.mode !== 'api' || !window.pywebview || !window.pywebview.api) return;
+        
+        if (!confirm('Êtes-vous sûr de vouloir supprimer cette conversation ?')) return;
+        
+        try {
+            const result = await window.pywebview.api.delete_conversation(conversationId);
+            if (result.success) {
+                if (conversationId === this.currentConversationId) {
+                    this.currentConversationId = null;
+                    this.clearChat();
+                }
+                this.appendMessageToChat('system', 'Conversation supprimée');
+                await this.loadConversations();
+            } else {
+                this.showError(`Erreur lors de la suppression: ${result.error}`);
+            }
+        } catch (error) {
+            this.showError(`Erreur lors de la suppression: ${error}`);
+        }
+    }
+    
+    async forceReleaseLock(conversationId) {
+        if (!confirm('Êtes-vous sûr de vouloir forcer le déverrouillage de cette conversation ?')) return;
+
+        try {
+            if (window.pywebview && window.pywebview.api) {
+                const result = await window.pywebview.api.force_release_lock(conversationId);
+                if (result.success) {
+                    this.appendMessageToChat('system', `Verrou libéré pour la conversation.`);
+                    await this.loadConversations();
+                } else {
+                    this.showError(`Erreur: ${result.error}`);
+                }
+            }
+        } catch (error) {
+            this.showError(`Erreur lors du déverrouillage: ${error.message}`);
+        }
+    }
+    
+    async renameConversation(conversationId, currentTitle) {
+        const newTitle = prompt('Nouveau titre pour la conversation :', currentTitle);
+        
+        if (newTitle && newTitle.trim() !== '' && newTitle !== currentTitle) {
+            // Validation côté client
+            if (newTitle.length > 100) {
+                this.showError('Le titre ne peut pas dépasser 100 caractères');
+                return;
+            }
+            
+            try {
+                if (window.pywebview && window.pywebview.api) {
+                    const result = await window.pywebview.api.update_conversation_title(conversationId, newTitle.trim());
+                    if (result.success) {
+                        this.appendMessageToChat('system', 'Conversation renommée.');
+                        if (this.currentConversationId === conversationId) {
+                            this.conversationSummary = newTitle.trim();
+                        }
+                        await this.loadConversations();
+                    } else {
+                        this.showError(`Erreur lors du renommage : ${result.error}`);
+                    }
+                }
+            } catch (error) {
+                this.showError(`Erreur lors du renommage : ${error.message}`);
+            }
+        }
+    }
+    
+    refreshChatDisplay() {
+        const chatDisplayArea = document.getElementById('chatDisplayArea');
+        if (!chatDisplayArea) return;
+        
+        chatDisplayArea.innerHTML = '';
+        
+        this.chatHistory.forEach(msg => {
+            this.appendMessageToChat(msg.role, msg.content, false);
+        });
+        
+        // Mettre à jour le compteur de tokens
+        this.updateTokenCount();
+    }
+    
+    estimateTokens(text) {
+        // Estimation simple: ~4 caractères par token
+        return Math.ceil(text.length / 4);
+    }
+    
+    async closeToolbox() {
+        console.log('Fermeture de la Toolbox...');
+        
+        // Demander confirmation si des modifications non sauvegardées
+        if (this.chatHistory.length > 0 && !this.currentConversationId) {
+            if (!confirm('Vous avez une conversation non sauvegardée. Voulez-vous vraiment fermer ?')) {
+                return;
+            }
+        }
+        
+        try {
+            // Libérer le verrou de la conversation active
+            if (this.currentConversationId) {
+                console.log(`Libération du verrou pour la conversation ${this.currentConversationId}`);
+                await window.pywebview.api.release_conversation_lock(this.currentConversationId);
+            }
+            
+            // Fermer la fenêtre
+            await window.pywebview.api.close_toolbox_window();
+        } catch (error) {
+            console.error('Erreur lors de la fermeture:', error);
+            // Essayer de fermer quand même
+            if (window.pywebview && window.pywebview.api) {
+                window.pywebview.api.close_toolbox_window();
+            }
+        }
+    }
+    
+    async releaseAllLocks() {
+        if (this.mode !== 'api' || !window.pywebview || !window.pywebview.api) return;
+        
+        if (!confirm('Voulez-vous libérer tous vos verrous actifs ?\n\nCela permettra aux autres instances d\'accéder aux conversations que vous avez verrouillées.')) {
+            return;
+        }
+        
+        try {
+            const result = await window.pywebview.api.release_all_instance_locks();
+            if (result.success) {
+                this.appendMessageToChat('system', result.message);
+                // Rafraîchir la liste des conversations
+                await this.loadConversations();
+                
+                // Si la conversation courante était verrouillée, réinitialiser
+                if (result.count > 0 && this.currentConversationId) {
+                    this.currentConversationId = null;
+                }
+            } else {
+                this.showError(`Erreur: ${result.error}`);
+            }
+        } catch (error) {
+            this.showError(`Erreur lors de la libération des verrous: ${error}`);
+        }
+    }
+    
     async loadPrompts() {
         try {
             if (window.pywebview && window.pywebview.api) {
@@ -1061,6 +1373,50 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
     }
+    
+    // Gestionnaires pour les conversations
+    const saveConversationBtn = document.getElementById('saveConversationBtn');
+    if (saveConversationBtn) {
+        saveConversationBtn.addEventListener('click', async () => {
+            if (toolboxController) {
+                await toolboxController.saveCurrentConversation();
+            }
+        });
+    }
+    
+    const refreshConversationsBtn = document.getElementById('refreshConversationsBtn');
+    if (refreshConversationsBtn) {
+        refreshConversationsBtn.addEventListener('click', async () => {
+            if (toolboxController) {
+                refreshConversationsBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+                await toolboxController.loadConversations();
+                refreshConversationsBtn.innerHTML = '<i class="fas fa-sync-alt"></i>';
+            }
+        });
+    }
+    
+    // Gestionnaire pour le bouton Libérer mes verrous
+    const releaseLocksBtn = document.getElementById('releaseLocksBtn');
+    if (releaseLocksBtn) {
+        releaseLocksBtn.addEventListener('click', async () => {
+            if (toolboxController) {
+                await toolboxController.releaseAllLocks();
+            }
+        });
+    }
+    
+    // Gestionnaire pour le bouton Fermer
+    const closeToolboxBtn = document.getElementById('closeToolboxBtn');
+    if (closeToolboxBtn) {
+        closeToolboxBtn.addEventListener('click', async () => {
+            if (toolboxController) {
+                await toolboxController.closeToolbox();
+            }
+        });
+    }
+    
+    // Rendre le contrôleur global pour les boutons inline
+    window.toolboxController = toolboxController;
     
     // Charger les prompts après un délai
     setTimeout(() => {

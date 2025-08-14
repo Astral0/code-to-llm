@@ -6,7 +6,12 @@ import json
 import appdirs
 import configparser
 import logging
+import uuid
+import getpass
+import socket
+import re
 from pathlib import Path
+from datetime import datetime, timezone
 # Enum local pour remplacer selenium.By
 class By:
     ID = "id"
@@ -134,6 +139,14 @@ class Api:
     def __init__(self):
         self._main_window = None
         self._browser_window = None
+        
+        # Générer un ID unique pour cette instance
+        self.instance_id = str(uuid.uuid4())
+        logging.info(f"Instance API initialisée avec l'ID: {self.instance_id}")
+        
+        # Créer le répertoire conversations
+        self.conversations_dir = os.path.join(DATA_DIR, 'conversations')
+        os.makedirs(self.conversations_dir, exist_ok=True)
         
         # Initialisation des services avec leurs configurations spécifiques
         self.git_service = GitService(SERVICE_CONFIGS['git_service'])
@@ -747,6 +760,332 @@ class Api:
             error_msg = f"Erreur lors de l'export de la conversation: {str(e)}"
             logging.error(error_msg)
             return {'success': False, 'error': error_msg}
+    
+    def get_conversations(self):
+        """Récupère la liste des conversations avec leur statut de verrouillage"""
+        try:
+            conversations = []
+            
+            # Parcourir tous les fichiers JSON dans le répertoire
+            for filename in os.listdir(self.conversations_dir):
+                if filename.endswith('.json'):
+                    filepath = os.path.join(self.conversations_dir, filename)
+                    try:
+                        with open(filepath, 'r', encoding='utf-8') as f:
+                            data = json.load(f)
+                        
+                        # Extraire les informations de verrouillage
+                        lock = data.get('metadata', {}).get('lock', {})
+                        is_locked = lock.get('active', False)
+                        is_locked_by_me = is_locked and lock.get('instanceId') == self.instance_id
+                        
+                        conversations.append({
+                            'id': data.get('id'),
+                            'title': data.get('title', 'Sans titre'),
+                            'updatedAt': data.get('updatedAt', ''),
+                            'isLocked': is_locked,
+                            'isLockedByMe': is_locked_by_me,
+                            'lockInfo': f"{lock.get('user', 'inconnu')}@{lock.get('host', 'inconnu')}" if is_locked else None
+                        })
+                    except Exception as e:
+                        logging.error(f"Erreur lors de la lecture de {filename}: {str(e)}")
+                        continue
+            
+            # Trier par date de mise à jour (plus récent en premier)
+            conversations.sort(key=lambda x: x['updatedAt'], reverse=True)
+            
+            return conversations
+            
+        except Exception as e:
+            logging.error(f"Erreur lors de la récupération des conversations: {str(e)}")
+            return []
+    
+    def save_conversation(self, conversation_data, force_save=False):
+        """Sauvegarde une conversation avec verrouillage automatique"""
+        try:
+            conv_id = conversation_data.get('id')
+            
+            # Si c'est une nouvelle conversation, générer un ID
+            if not conv_id:
+                conv_id = str(uuid.uuid4())
+                conversation_data['id'] = conv_id
+                conversation_data['createdAt'] = datetime.now(timezone.utc).isoformat()
+            
+            # Vérifier le verrouillage existant si nécessaire
+            if conv_id and not force_save:
+                filepath = os.path.join(self.conversations_dir, f"{conv_id}.json")
+                if os.path.exists(filepath):
+                    with open(filepath, 'r', encoding='utf-8') as f:
+                        existing_data = json.load(f)
+                    
+                    existing_lock = existing_data.get('metadata', {}).get('lock', {})
+                    if existing_lock.get('active', False) and existing_lock.get('instanceId') != self.instance_id:
+                        lock_info = f"{existing_lock.get('user', 'inconnu')}@{existing_lock.get('host', 'inconnu')}"
+                        raise ValueError(f"Conversation verrouillée par {lock_info}")
+            
+            # Mettre à jour les métadonnées
+            conversation_data['updatedAt'] = datetime.now(timezone.utc).isoformat()
+            conversation_data['version'] = '2.0'
+            
+            # Appliquer notre verrou
+            conversation_data.setdefault('metadata', {})
+            conversation_data['metadata']['lock'] = {
+                'active': True,
+                'instanceId': self.instance_id,
+                'timestamp': datetime.now(timezone.utc).isoformat(),
+                'user': getpass.getuser(),
+                'host': socket.gethostname()
+            }
+            
+            # Sauvegarder le fichier
+            filepath = os.path.join(self.conversations_dir, f"{conv_id}.json")
+            with open(filepath, 'w', encoding='utf-8') as f:
+                json.dump(conversation_data, f, ensure_ascii=False, indent=2)
+            
+            logging.info(f"Conversation {conv_id} sauvegardée avec succès")
+            return {'success': True, 'id': conv_id, 'title': conversation_data.get('title', 'Sans titre')}
+            
+        except Exception as e:
+            logging.error(f"Erreur lors de la sauvegarde de la conversation: {str(e)}")
+            return {'success': False, 'error': str(e)}
+    
+    def get_conversation_details(self, conversation_id):
+        """Récupère les détails complets d'une conversation"""
+        try:
+            filepath = os.path.join(self.conversations_dir, f"{conversation_id}.json")
+            if not os.path.exists(filepath):
+                raise FileNotFoundError(f"Conversation {conversation_id} non trouvée")
+            
+            with open(filepath, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        
+        except Exception as e:
+            logging.error(f"Erreur lors de la récupération de la conversation {conversation_id}: {str(e)}")
+            return None
+    
+    def release_conversation_lock(self, conversation_id):
+        """Libère le verrou d'une conversation"""
+        try:
+            filepath = os.path.join(self.conversations_dir, f"{conversation_id}.json")
+            if not os.path.exists(filepath):
+                return {'success': False, 'error': 'Conversation non trouvée'}
+            
+            # Lire directement le fichier
+            with open(filepath, 'r', encoding='utf-8') as f:
+                conversation = json.load(f)
+            
+            # Désactiver le verrou
+            if 'metadata' in conversation and 'lock' in conversation['metadata']:
+                conversation['metadata']['lock']['active'] = False
+            
+            # Sauvegarder directement
+            with open(filepath, 'w', encoding='utf-8') as f:
+                json.dump(conversation, f, ensure_ascii=False, indent=2)
+            
+            logging.info(f"Verrou libéré pour la conversation {conversation_id}")
+            return {'success': True}
+            
+        except Exception as e:
+            logging.error(f"Erreur lors de la libération du verrou: {str(e)}")
+            return {'success': False, 'error': str(e)}
+    
+    def force_release_lock(self, conversation_id: str) -> dict:
+        """
+        Force la libération du verrou pour une conversation spécifique.
+        
+        Args:
+            conversation_id: L'ID de la conversation à déverrouiller.
+        
+        Returns:
+            Dictionnaire avec le statut de l'opération.
+        """
+        try:
+            filepath = os.path.join(self.conversations_dir, f"{conversation_id}.json")
+            if not os.path.exists(filepath):
+                return {'success': False, 'error': 'Conversation non trouvée'}
+
+            with open(filepath, 'r', encoding='utf-8') as f:
+                conversation = json.load(f)
+
+            lock = conversation.get('metadata', {}).get('lock', {})
+            if lock.get('active', False):
+                # Log détaillé pour la traçabilité
+                previous_owner = lock.get('user', 'inconnu')
+                previous_host = lock.get('host', 'inconnu')
+                logging.warning(f"Déverrouillage forcé de {conversation_id} - Propriétaire précédent: {previous_owner}@{previous_host}, Par: {getpass.getuser()}@{socket.gethostname()}")
+                
+                lock['active'] = False
+                conversation['metadata']['lock'] = lock
+                
+                with open(filepath, 'w', encoding='utf-8') as f:
+                    json.dump(conversation, f, ensure_ascii=False, indent=2)
+                
+                return {'success': True, 'message': 'Verrou libéré avec succès.'}
+            else:
+                return {'success': True, 'message': 'La conversation n\'était pas verrouillée.'}
+
+        except Exception as e:
+            error_msg = f"Erreur lors de la libération forcée du verrou : {str(e)}"
+            logging.error(error_msg)
+            return {'success': False, 'error': error_msg}
+    
+    def delete_conversation(self, conversation_id):
+        """Supprime une conversation"""
+        try:
+            filepath = os.path.join(self.conversations_dir, f"{conversation_id}.json")
+            if os.path.exists(filepath):
+                os.remove(filepath)
+                logging.info(f"Conversation {conversation_id} supprimée")
+                return {'success': True}
+            else:
+                return {'success': False, 'error': 'Conversation non trouvée'}
+        
+        except Exception as e:
+            logging.error(f"Erreur lors de la suppression de la conversation: {str(e)}")
+            return {'success': False, 'error': str(e)}
+    
+    def update_conversation_title(self, conversation_id: str, new_title: str) -> dict:
+        """Met à jour le titre d'une conversation avec validation."""
+        try:
+            # Validation du titre
+            if not new_title or not new_title.strip():
+                return {'success': False, 'error': 'Le titre ne peut pas être vide'}
+            
+            if len(new_title) > 100:
+                return {'success': False, 'error': 'Le titre ne peut pas dépasser 100 caractères'}
+            
+            filepath = os.path.join(self.conversations_dir, f"{conversation_id}.json")
+            if not os.path.exists(filepath):
+                return {'success': False, 'error': 'Conversation non trouvée'}
+
+            with open(filepath, 'r', encoding='utf-8') as f:
+                conversation = json.load(f)
+            
+            # Vérification du verrou
+            lock = conversation.get('metadata', {}).get('lock', {})
+            if lock.get('active', False) and lock.get('instanceId') != self.instance_id:
+                return {'success': False, 'error': f"Conversation verrouillée par {lock.get('user', 'inconnu')}"}
+
+            conversation['title'] = new_title.strip()
+            conversation['updatedAt'] = datetime.now(timezone.utc).isoformat()
+            
+            with open(filepath, 'w', encoding='utf-8') as f:
+                json.dump(conversation, f, ensure_ascii=False, indent=2)
+            
+            logging.info(f"Titre de la conversation {conversation_id} mis à jour: {new_title}")
+            return {'success': True, 'id': conversation_id, 'title': new_title.strip()}
+            
+        except Exception as e:
+            error_msg = f"Erreur lors de la mise à jour du titre: {str(e)}"
+            logging.error(error_msg)
+            return {'success': False, 'error': error_msg}
+    
+    def duplicate_conversation(self, conversation_id: str) -> dict:
+        """
+        Duplique une conversation. La nouvelle conversation n'est pas verrouillée
+        et appartient à l'instance actuelle.
+        """
+        try:
+            source_conv = self.get_conversation_details(conversation_id)
+            if not source_conv:
+                return {'success': False, 'error': 'Conversation source non trouvée'}
+
+            # Création d'un objet propre au lieu d'une copie
+            # On ne prend que les données nécessaires de la source
+            new_conv_data = {
+                "history": source_conv.get('history', []),
+                "context": source_conv.get('context', {})
+                # L'ID, titre, dates, version et métadonnées seront créés par save_conversation
+            }
+
+            # Gestion intelligente du titre pour éviter "Copie de Copie de..."
+            original_title = source_conv.get('title', 'Sans titre')
+            # Utilise une regex pour trouver "Copie de (N)"
+            match = re.match(r'Copie de \((\d+)\) (.+)', original_title)
+            if match:
+                count = int(match.group(1)) + 1
+                base_title = match.group(2)
+                new_title = f"Copie de ({count}) {base_title}"
+            elif original_title.startswith('Copie de '):
+                # Si c'est déjà "Copie de X" sans numéro, on ajoute (2)
+                base_title = original_title[9:]  # Enlève "Copie de "
+                new_title = f"Copie de (2) {base_title}"
+            else:
+                # Si c'est la première copie
+                new_title = f"Copie de {original_title}"
+            
+            new_conv_data['title'] = new_title
+
+            logging.info(f"Duplication de la conversation '{original_title}' vers '{new_title}'")
+            
+            # save_conversation va maintenant créer une conversation 100% neuve et propre
+            return self.save_conversation(new_conv_data)
+            
+        except Exception as e:
+            error_msg = f"Erreur lors de la duplication : {str(e)}"
+            logging.error(error_msg, exc_info=True)  # exc_info=True pour avoir la stack trace
+            return {'success': False, 'error': error_msg}
+    
+    def close_toolbox_window(self):
+        """Ferme proprement la fenêtre toolbox"""
+        try:
+            if self._toolbox_window and not self._toolbox_window.destroyed:
+                self._toolbox_window.destroy()
+                self._toolbox_window = None
+                logging.info("Fenêtre Toolbox fermée proprement")
+                return {'success': True}
+            return {'success': False, 'error': 'Aucune fenêtre Toolbox ouverte'}
+        except Exception as e:
+            logging.error(f"Erreur lors de la fermeture de la Toolbox: {str(e)}")
+            return {'success': False, 'error': str(e)}
+    
+    def release_all_instance_locks(self):
+        """Libère tous les verrous créés par l'utilisateur actuel sur cette machine."""
+        try:
+            released_count = 0
+            
+            # Récupérer l'utilisateur et l'hôte actuels
+            current_user = getpass.getuser()
+            current_host = socket.gethostname()
+            
+            logging.info(f"Libération de tous les verrous pour {current_user}@{current_host}")
+
+            # Parcourir tous les fichiers de conversations
+            for filename in os.listdir(self.conversations_dir):
+                if filename.endswith('.json'):
+                    filepath = os.path.join(self.conversations_dir, filename)
+                    try:
+                        # Lire le fichier
+                        with open(filepath, 'r', encoding='utf-8') as f:
+                            conversation = json.load(f)
+                        
+                        lock = conversation.get('metadata', {}).get('lock', {})
+                        
+                        # Condition de vérification changée : on compare l'utilisateur et l'hôte
+                        if (lock.get('active', False) and 
+                            lock.get('user') == current_user and 
+                            lock.get('host') == current_host):
+                            
+                            # Libérer le verrou
+                            conversation['metadata']['lock']['active'] = False
+                            
+                            # Sauvegarder
+                            with open(filepath, 'w', encoding='utf-8') as f:
+                                json.dump(conversation, f, ensure_ascii=False, indent=2)
+                            
+                            released_count += 1
+                            logging.info(f"Verrou orphelin libéré pour {conversation.get('title', filename)}")
+                    
+                    except Exception as e:
+                        logging.error(f"Erreur lors du traitement de {filename} pour libérer le verrou: {str(e)}")
+                        continue
+            
+            message = f"{released_count} verrou(x) libéré(s)" if released_count > 0 else "Aucun verrou actif trouvé pour cet utilisateur."
+            return {'success': True, 'count': released_count, 'message': message}
+            
+        except Exception as e:
+            logging.error(f"Erreur lors de la libération des verrous: {str(e)}")
+            return {'success': False, 'error': str(e)}
 
 def run_flask():
     app.run(port=5000, debug=False)
