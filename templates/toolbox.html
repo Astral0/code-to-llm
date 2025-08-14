@@ -360,7 +360,7 @@
                         <div id="conversationsList" class="mb-3">
                             <!-- La liste des conversations sera générée ici -->
                         </div>
-                        <button id="saveConversationBtn" class="btn btn-success btn-sm w-100 api-mode-only mb-2">
+                        <button id="saveConversationBtn" class="btn btn-success btn-sm w-100 api-mode-only mb-2" disabled title="Commencez une conversation pour pouvoir la sauvegarder">
                             <i class="fas fa-save"></i> Sauvegarder conversation actuelle
                         </button>
                         <button id="releaseLocksBtn" class="btn btn-warning btn-sm w-100 api-mode-only" title="Libérer tous vos verrous actifs">
@@ -429,6 +429,40 @@
                             </button>
                         </div>
                     </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal de Sauvegarde de Conversation -->
+    <div class="modal fade" id="saveConversationModal" tabindex="-1" aria-labelledby="saveConversationModalLabel" aria-hidden="true" data-bs-backdrop="static" data-bs-keyboard="false">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="saveConversationModalLabel"><i class="fas fa-save"></i> Sauvegarder la conversation</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="text-muted small">Entrez un titre pour votre conversation ou utilisez la baguette magique pour obtenir une suggestion de l'IA.</p>
+                    <div class="mb-3">
+                        <label for="conversationTitleInput" class="form-label">Titre de la conversation :</label>
+                        <div class="input-group">
+                            <input type="text" class="form-control" id="conversationTitleInput" placeholder="Nouvelle conversation...">
+                            <button class="btn btn-outline-secondary" type="button" id="suggestTitleBtn" title="Suggérer un titre avec l'IA">
+                                <i class="fas fa-magic"></i>
+                            </button>
+                            <span class="input-group-text d-none" id="title-suggestion-spinner">
+                                <div class="spinner-border spinner-border-sm" role="status">
+                                    <span class="visually-hidden">Loading...</span>
+                                </div>
+                            </span>
+                        </div>
+                        <small class="text-muted" id="titleCharCount">0 / 100 caractères</small>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Annuler</button>
+                    <button type="button" class="btn btn-primary" id="confirmSaveBtn"><i class="fas fa-check"></i> Sauvegarder</button>
                 </div>
             </div>
         </div>

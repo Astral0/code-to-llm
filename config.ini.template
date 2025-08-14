@@ -15,18 +15,41 @@ enabled = false
 stream_response = true
 ssl_verify = true # Set to false to disable SSL certificate verification (use with caution)
 timeout_seconds = 300 # Timeout in seconds for LLM API requests (default: 300)
+# Paramètres optionnels pour contrôler la génération
+# temperature = 0.7  # Contrôle la créativité (0.0 = déterministe, 1.0 = très créatif)
+# max_tokens = 4096  # Nombre maximum de tokens pour la réponse
 
 [SummarizerLLM]
 # LLM pour le RESUME du code (compression "lossy")
 # Peut être différent du LLM de chat. Ex: un modèle spécialisé en code.
-url = http://localhost:11434 # Pointe vers votre instance Ollama locale
+url = http://localhost:11434
 apikey = YOUR_LLM_API_KEY_HERE
-model = llama3:70b # Modèle puissant pour le résumé
+model = llama3:70b
 api_type = ollama
-enabled = true # Doit être activé pour que la fonction de résumé fonctionne
+enabled = true
 summarizer_prompt = Tu es un expert en analyse de code source. Analyse le fichier `{file_path}` et fournis un résumé concis au format JSON. Le format de sortie doit être EXCLUSIVEMENT un objet JSON valide.\n\nInstructions pour chaque clé :\n- "role": Décris en une phrase le rôle principal du fichier (ex: "Serveur web Flask pour l'application principale", "Logique frontend pour l'interaction utilisateur", "Module de construction de contexte LLM").\n- "public_interface": Liste les fonctions, classes, ou endpoints API principaux qui sont destinés à être utilisés par d'autres parties du code. Sois concis. Pour du HTML, liste les sections principales. Pour du CSS, les classes majeures.\n- "dependencies": Liste les modules ou fichiers importés qui sont essentiels à ce fichier.\n\nCode du fichier `{file_path}`:\n---\n{content}\n---
 summarizer_timeout_seconds = 300
 summarizer_max_workers = 2
+
+[TitleGeneratorLLM]
+# Configuration optionnelle pour la génération automatique de titres de conversation
+# Si cette section est absente ou disabled, le système utilisera [LLMServer] en fallback
+enabled = true
+# URL et clé API spécifiques (optionnelles, fallback sur LLMServer si non définies)
+# url = YOUR_TITLE_LLM_API_URL_HERE
+# apikey = YOUR_TITLE_LLM_API_KEY_HERE
+# model = gpt-3.5-turbo  # Modèle plus léger pour la génération de titres
+  # Hérite de LLMServer si non défini:
+api_type = openai
+title_prompt = En te basant sur l'historique de conversation suivant, génère un titre court et descriptif (maximum 10 mots) qui résume le sujet principal. Réponds UNIQUEMENT avec le titre, sans guillemets ni préfixe comme "Titre :".\n\n### Historique\n{history}
+# Longueur maximale du titre en caractères
+max_title_length = 100
+# Timeout court pour ne pas bloquer l'UX
+timeout_seconds = 15
+# Temperature pour la créativité (0.0 = déterministe, 1.0 = créatif)
+# temperature = 0.7
+# Nombre maximum de tokens pour la réponse (optionnel, peut causer des problèmes avec certaines APIs)
+# max_tokens = 100
 
 
 [Tokens]

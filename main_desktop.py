@@ -92,6 +92,43 @@ def load_config():
 CONFIG = load_config()
 
 # Charger les configurations spécifiques aux services
+def safe_parse_config_value(config, section, option, value_type=str, default=None):
+    """
+    Parse de manière sûre une valeur de configuration en gérant les commentaires inline.
+    
+    Args:
+        config: ConfigParser instance
+        section: Section du fichier config
+        option: Option à lire
+        value_type: Type attendu (str, int, float, bool)
+        default: Valeur par défaut si le parsing échoue
+        
+    Returns:
+        La valeur parsée ou default
+    """
+    if not config.has_option(section, option):
+        return default
+        
+    try:
+        value = config.get(section, option)
+        
+        # Nettoyer les commentaires inline si présents
+        if '#' in value:
+            value = value.split('#')[0].strip()
+            
+        if value_type == bool:
+            return config.getboolean(section, option, fallback=default)
+        elif value_type == int:
+            return int(value)
+        elif value_type == float:
+            return float(value)
+        else:
+            return value
+            
+    except (ValueError, TypeError) as e:
+        logging.warning(f"Impossible de parser {section}.{option}='{value}' comme {value_type.__name__}: {e}")
+        return default
+
 def load_service_configs():
     """Charge les configurations spécifiques pour chaque service"""
     config = configparser.ConfigParser()
@@ -112,7 +149,7 @@ def load_service_configs():
         
         # Configuration LLM
         if 'LLMServer' in config:
-            service_configs['llm_service'] = {
+            llm_config = {
                 'enabled': config.getboolean('LLMServer', 'enabled', fallback=False),
                 'url': config.get('LLMServer', 'url', fallback=''),
                 'apikey': config.get('LLMServer', 'apikey', fallback=''),
@@ -122,6 +159,17 @@ def load_service_configs():
                 'stream_response': config.getboolean('LLMServer', 'stream_response', fallback=False),
                 'timeout_seconds': config.getint('LLMServer', 'timeout_seconds', fallback=300)
             }
+            
+            # Ajouter les paramètres optionnels s'ils existent
+            temp = safe_parse_config_value(config, 'LLMServer', 'temperature', float, None)
+            if temp is not None:
+                llm_config['temperature'] = temp
+                
+            max_tokens = safe_parse_config_value(config, 'LLMServer', 'max_tokens', int, None)
+            if max_tokens is not None:
+                llm_config['max_tokens'] = max_tokens
+                    
+            service_configs['llm_service'] = llm_config
     
     return service_configs
 
@@ -137,12 +185,15 @@ else:
 
 class Api:
     def __init__(self):
+        # Initialiser le logger pour cette classe
+        self.logger = logging.getLogger(self.__class__.__name__)
+        
         self._main_window = None
         self._browser_window = None
         
         # Générer un ID unique pour cette instance
         self.instance_id = str(uuid.uuid4())
-        logging.info(f"Instance API initialisée avec l'ID: {self.instance_id}")
+        self.logger.info(f"Instance API initialisée avec l'ID: {self.instance_id}")
         
         # Créer le répertoire conversations
         self.conversations_dir = os.path.join(DATA_DIR, 'conversations')
@@ -708,6 +759,32 @@ class Api:
         except Exception as e:
             logging.error(f"Erreur lors de l'appel au LLM: {str(e)}")
             return {'error': str(e)}
+    
+    def generate_conversation_title(self, chat_history, main_context=None):
+        """
+        Demande au service LLM de générer un titre basé sur l'historique.
+        
+        Args:
+            chat_history: L'historique de la conversation.
+            main_context: Le contexte principal du projet (optionnel).
+        
+        Returns:
+            Un dictionnaire avec le titre suggéré.
+        """
+        try:
+            self.logger.info("Génération d'un titre pour la conversation")
+            suggested_title = self.llm_service.generate_title(chat_history, main_context)
+            
+            if suggested_title:
+                self.logger.info(f"Titre généré avec succès: {suggested_title}")
+                return {'success': True, 'title': suggested_title}
+            else:
+                self.logger.info("Aucun titre généré, utilisation du fallback")
+                return {'success': True, 'title': ''}
+                
+        except Exception as e:
+            self.logger.error(f"Erreur dans la façade API lors de la génération du titre: {e}")
+            return {'success': False, 'error': str(e), 'title': ''}
 
     def save_conversation_dialog(self, chat_data):
         """Ouvre une boîte de dialogue pour sauvegarder la conversation"""
