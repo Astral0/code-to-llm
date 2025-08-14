@@ -819,19 +819,22 @@ class ToolboxController {
             const dateStr = date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
             
             convDiv.innerHTML = `
-                <div class="conversation-header">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div class="fw-bold">${conv.title || 'Sans titre'}</div>
                     ${lockIcon}
-                    <div class="title" onclick="window.toolboxController.renameConversation('${conv.id}', '${conv.title ? conv.title.replace(/'/g, "\\'") : ''}')">${conv.title || 'Sans titre'}</div>
                 </div>
-                <div class="meta">${dateStr}</div>
+                <div class="meta mb-2">${dateStr}</div>
                 <div class="conversation-actions">
-                    <button class="btn btn-sm btn-outline-primary" onclick="window.toolboxController.loadConversation('${conv.id}')" ${conv.isLocked && !conv.isLockedByMe ? 'disabled' : ''}>
-                        <i class="fas fa-folder-open"></i> Charger
+                    <button class="btn btn-sm btn-outline-primary" onclick="window.toolboxController.loadConversation('${conv.id}')" ${conv.isLocked && !conv.isLockedByMe ? 'disabled' : ''} title="Charger">
+                        <i class="fas fa-folder-open"></i>
                     </button>
-                    <button class="btn btn-sm btn-outline-info" onclick="window.toolboxController.duplicateConversation('${conv.id}')">
+                    <button class="btn btn-sm btn-outline-secondary" onclick="window.toolboxController.renameConversation('${conv.id}')" ${conv.isLocked && !conv.isLockedByMe ? 'disabled' : ''} title="Renommer">
+                        <i class="fas fa-edit"></i>
+                    </button>
+                    <button class="btn btn-sm btn-outline-info" onclick="window.toolboxController.duplicateConversation('${conv.id}')" title="Dupliquer">
                         <i class="fas fa-copy"></i>
                     </button>
-                    <button class="btn btn-sm btn-outline-danger" onclick="window.toolboxController.deleteConversation('${conv.id}')" ${conv.isLocked && !conv.isLockedByMe ? 'disabled' : ''}>
+                    <button class="btn btn-sm btn-outline-danger" onclick="window.toolboxController.deleteConversation('${conv.id}')" ${conv.isLocked && !conv.isLockedByMe ? 'disabled' : ''} title="Supprimer">
                         <i class="fas fa-trash"></i>
                     </button>
                 </div>
@@ -869,7 +872,7 @@ class ToolboxController {
         if (this.mode !== 'api' || !window.pywebview || !window.pywebview.api) return;
 
         const saveBtn = document.getElementById('saveConversationBtn');
-        if (!saveBtn || saveBtn.disabled) return;
+        if (!saveBtn) return;
 
         // Sauvegarde rapide si la conversation a déjà un ID
         if (this.currentConversationId) {
@@ -1080,6 +1083,149 @@ class ToolboxController {
         }
     }
     
+    async renameConversation(conversationId) {
+        if (this.mode !== 'api' || !window.pywebview || !window.pywebview.api) return;
+        
+        // Trouver la conversation dans la liste
+        const conversation = this.conversations.find(c => c.id === conversationId);
+        if (!conversation) {
+            this.showError('Conversation non trouvée');
+            return;
+        }
+        
+        const modalElement = document.getElementById('saveConversationModal');
+        const modal = new bootstrap.Modal(modalElement);
+        const titleInput = document.getElementById('conversationTitleInput');
+        const suggestBtn = document.getElementById('suggestTitleBtn');
+        const spinner = document.getElementById('title-suggestion-spinner');
+        const confirmSaveBtn = document.getElementById('confirmSaveBtn');
+        const charCountSpan = document.getElementById('titleCharCount');
+        const modalTitle = document.getElementById('saveConversationModalLabel');
+        
+        // Adapter le titre de la modale
+        modalTitle.innerHTML = '<i class="fas fa-edit"></i> Renommer la conversation';
+        
+        // Variables pour le suivi
+        let titleGeneratedByAI = false;
+        const originalTitle = conversation.title;
+        
+        // Charger les détails de la conversation pour la baguette magique
+        let conversationDetails = null;
+        try {
+            conversationDetails = await window.pywebview.api.get_conversation_details(conversationId);
+        } catch (error) {
+            console.error('Impossible de charger les détails de la conversation:', error);
+        }
+        
+        // Initialiser la modale avec le titre actuel
+        titleInput.value = originalTitle;
+        titleInput.placeholder = 'Titre de la conversation';
+        titleInput.disabled = false;
+        suggestBtn.classList.remove('d-none');
+        spinner.classList.add('d-none');
+        confirmSaveBtn.disabled = false;
+        
+        // Mettre à jour le compteur de caractères
+        const updateCharCount = () => {
+            const length = titleInput.value.length;
+            charCountSpan.textContent = `${length} / 100 caractères`;
+            charCountSpan.classList.toggle('text-warning', length > 90);
+            titleGeneratedByAI = false;
+        };
+        updateCharCount();
+        titleInput.addEventListener('input', updateCharCount);
+        
+        modal.show();
+        titleInput.focus();
+        titleInput.select();
+        
+        // Gérer la suggestion IA
+        const handleSuggest = async () => {
+            suggestBtn.classList.add('d-none');
+            spinner.classList.remove('d-none');
+            titleInput.disabled = true;
+            confirmSaveBtn.disabled = true;
+            
+            try {
+                if (conversationDetails) {
+                    const titleResult = await window.pywebview.api.generate_conversation_title(
+                        conversationDetails.history || [],
+                        conversationDetails.context?.fullContext || ''
+                    );
+                    if (titleResult.success && titleResult.title) {
+                        titleInput.value = titleResult.title;
+                        titleGeneratedByAI = true;
+                        updateCharCount();
+                    } else {
+                        this.showError('Impossible de générer un titre');
+                    }
+                } else {
+                    this.showError('Détails de la conversation non disponibles');
+                }
+            } catch (error) {
+                this.showError(`Erreur: ${error.message || error}`);
+            } finally {
+                spinner.classList.add('d-none');
+                suggestBtn.classList.remove('d-none');
+                titleInput.disabled = false;
+                confirmSaveBtn.disabled = false;
+                titleInput.focus();
+            }
+        };
+        
+        suggestBtn.onclick = handleSuggest;
+        
+        // Gérer la confirmation du renommage
+        const handleRename = async () => {
+            const newTitle = titleInput.value.trim();
+            
+            if (!newTitle) {
+                alert('Le titre ne peut pas être vide');
+                return;
+            }
+            
+            if (newTitle === originalTitle) {
+                modal.hide();
+                return;
+            }
+            
+            try {
+                const result = await window.pywebview.api.update_conversation_title(conversationId, newTitle);
+                if (result.success) {
+                    // Mettre à jour le titre local si c'est la conversation courante
+                    if (this.currentConversationId === conversationId) {
+                        this.conversationSummary = result.title;
+                    }
+                    this.appendMessageToChat('system', `Conversation renommée: ${result.title}`);
+                    await this.loadConversations();
+                    modal.hide();
+                } else {
+                    this.showError(`Erreur: ${result.error}`);
+                }
+            } catch (error) {
+                this.showError(`Erreur: ${error}`);
+            }
+        };
+        
+        confirmSaveBtn.onclick = handleRename;
+        
+        titleInput.onkeypress = (e) => {
+            if (e.key === 'Enter' && !confirmSaveBtn.disabled) {
+                handleRename();
+            }
+        };
+        
+        // Nettoyer lors de la fermeture
+        modalElement.addEventListener('hidden.bs.modal', () => {
+            // Restaurer le titre original de la modale
+            modalTitle.innerHTML = '<i class="fas fa-save"></i> Sauvegarder la conversation';
+            suggestBtn.onclick = null;
+            confirmSaveBtn.onclick = null;
+            titleInput.onkeypress = null;
+            titleInput.removeEventListener('input', updateCharCount);
+        }, { once: true });
+    }
+    
     async deleteConversation(conversationId) {
         if (this.mode !== 'api' || !window.pywebview || !window.pywebview.api) return;
         
@@ -1117,35 +1263,6 @@ class ToolboxController {
             }
         } catch (error) {
             this.showError(`Erreur lors du déverrouillage: ${error.message}`);
-        }
-    }
-    
-    async renameConversation(conversationId, currentTitle) {
-        const newTitle = prompt('Nouveau titre pour la conversation :', currentTitle);
-        
-        if (newTitle && newTitle.trim() !== '' && newTitle !== currentTitle) {
-            // Validation côté client
-            if (newTitle.length > 100) {
-                this.showError('Le titre ne peut pas dépasser 100 caractères');
-                return;
-            }
-            
-            try {
-                if (window.pywebview && window.pywebview.api) {
-                    const result = await window.pywebview.api.update_conversation_title(conversationId, newTitle.trim());
-                    if (result.success) {
-                        this.appendMessageToChat('system', 'Conversation renommée.');
-                        if (this.currentConversationId === conversationId) {
-                            this.conversationSummary = newTitle.trim();
-                        }
-                        await this.loadConversations();
-                    } else {
-                        this.showError(`Erreur lors du renommage : ${result.error}`);
-                    }
-                }
-            } catch (error) {
-                this.showError(`Erreur lors du renommage : ${error.message}`);
-            }
         }
     }
     

@@ -966,6 +966,42 @@ class Api:
             logging.error(f"Erreur lors de la libération du verrou: {str(e)}")
             return {'success': False, 'error': str(e)}
     
+    def update_conversation_title(self, conversation_id: str, new_title: str) -> dict:
+        """Met à jour le titre d'une conversation existante."""
+        try:
+            # Validation du titre
+            if not new_title or not new_title.strip():
+                return {'success': False, 'error': 'Le titre ne peut pas être vide'}
+            
+            clean_title = new_title.strip()[:100]  # Limiter à 100 caractères
+            
+            filepath = os.path.join(self.conversations_dir, f"{conversation_id}.json")
+            if not os.path.exists(filepath):
+                return {'success': False, 'error': 'Conversation non trouvée'}
+
+            with open(filepath, 'r', encoding='utf-8') as f:
+                conversation = json.load(f)
+            
+            # Vérification du verrou
+            lock = conversation.get('metadata', {}).get('lock', {})
+            if lock.get('active', False) and lock.get('instanceId') != self.instance_id:
+                return {'success': False, 'error': f"Conversation verrouillée par {lock.get('user', 'inconnu')}"}
+
+            # Mise à jour
+            conversation['title'] = clean_title
+            conversation['updatedAt'] = datetime.now(timezone.utc).isoformat()
+            
+            with open(filepath, 'w', encoding='utf-8') as f:
+                json.dump(conversation, f, ensure_ascii=False, indent=2)
+            
+            self.logger.info(f"Titre de la conversation {conversation_id} mis à jour: {clean_title}")
+            return {'success': True, 'id': conversation_id, 'title': clean_title}
+            
+        except Exception as e:
+            error_msg = f"Erreur lors de la mise à jour du titre: {str(e)}"
+            self.logger.error(error_msg)
+            return {'success': False, 'error': error_msg}
+    
     def force_release_lock(self, conversation_id: str) -> dict:
         """
         Force la libération du verrou pour une conversation spécifique.
@@ -1020,42 +1056,6 @@ class Api:
         except Exception as e:
             logging.error(f"Erreur lors de la suppression de la conversation: {str(e)}")
             return {'success': False, 'error': str(e)}
-    
-    def update_conversation_title(self, conversation_id: str, new_title: str) -> dict:
-        """Met à jour le titre d'une conversation avec validation."""
-        try:
-            # Validation du titre
-            if not new_title or not new_title.strip():
-                return {'success': False, 'error': 'Le titre ne peut pas être vide'}
-            
-            if len(new_title) > 100:
-                return {'success': False, 'error': 'Le titre ne peut pas dépasser 100 caractères'}
-            
-            filepath = os.path.join(self.conversations_dir, f"{conversation_id}.json")
-            if not os.path.exists(filepath):
-                return {'success': False, 'error': 'Conversation non trouvée'}
-
-            with open(filepath, 'r', encoding='utf-8') as f:
-                conversation = json.load(f)
-            
-            # Vérification du verrou
-            lock = conversation.get('metadata', {}).get('lock', {})
-            if lock.get('active', False) and lock.get('instanceId') != self.instance_id:
-                return {'success': False, 'error': f"Conversation verrouillée par {lock.get('user', 'inconnu')}"}
-
-            conversation['title'] = new_title.strip()
-            conversation['updatedAt'] = datetime.now(timezone.utc).isoformat()
-            
-            with open(filepath, 'w', encoding='utf-8') as f:
-                json.dump(conversation, f, ensure_ascii=False, indent=2)
-            
-            logging.info(f"Titre de la conversation {conversation_id} mis à jour: {new_title}")
-            return {'success': True, 'id': conversation_id, 'title': new_title.strip()}
-            
-        except Exception as e:
-            error_msg = f"Erreur lors de la mise à jour du titre: {str(e)}"
-            logging.error(error_msg)
-            return {'success': False, 'error': error_msg}
     
     def duplicate_conversation(self, conversation_id: str) -> dict:
         """
