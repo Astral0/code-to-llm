@@ -1029,10 +1029,15 @@ class Api:
     def close_toolbox_window(self):
         """Ferme proprement la fenêtre toolbox"""
         try:
-            if self._toolbox_window and not self._toolbox_window.destroyed:
-                self._toolbox_window.destroy()
-                self._toolbox_window = None
-                logging.info("Fenêtre Toolbox fermée proprement")
+            if self._toolbox_window:
+                try:
+                    self._toolbox_window.destroy()
+                    logging.info("Fenêtre Toolbox fermée proprement")
+                except Exception as destroy_error:
+                    # La fenêtre pourrait déjà être fermée
+                    logging.debug(f"Erreur lors de la destruction de la fenêtre (peut être ignorée): {destroy_error}")
+                finally:
+                    self._toolbox_window = None
                 return {'success': True}
             return {'success': False, 'error': 'Aucune fenêtre Toolbox ouverte'}
         except Exception as e:
