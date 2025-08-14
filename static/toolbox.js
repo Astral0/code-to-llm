@@ -983,6 +983,36 @@ class ToolboxController {
         return Math.ceil(text.length / 4);
     }
     
+    updateTokenCount() {
+        // Calculer le nombre total de tokens dans l'historique
+        let totalTokens = 0;
+        this.chatHistory.forEach(msg => {
+            totalTokens += this.estimateTokens(msg.content);
+        });
+        
+        // Mettre à jour l'affichage
+        const tokenSpan = document.getElementById('chat-token-count');
+        if (tokenSpan) {
+            tokenSpan.textContent = totalTokens.toLocaleString();
+        }
+    }
+    
+    updateContextStatus(hasContext) {
+        const contextStatus = document.getElementById('contextStatus');
+        if (contextStatus) {
+            if (hasContext) {
+                contextStatus.classList.remove('no-context');
+                contextStatus.innerHTML = '<i class="fas fa-check-circle text-success"></i> Contexte importé';
+            } else {
+                contextStatus.classList.add('no-context');
+                contextStatus.innerHTML = '<i class="fas fa-exclamation-circle text-warning"></i> Aucun contexte importé';
+            }
+        }
+        
+        // Mettre à jour l'état des boutons
+        this.updateButtonStates();
+    }
+    
     async closeToolbox() {
         console.log('Fermeture de la Toolbox...');
         
@@ -1286,6 +1316,8 @@ let toolboxController = null;
 window.initializeToolboxMode = function() {
     console.log('Initialisation du mode Toolbox:', window.toolboxMode);
     toolboxController = new ToolboxController();
+    // Exposer l'instance à la fenêtre pour les boutons HTML
+    window.toolboxController = toolboxController;
 };
 
 // Initialisation au chargement du DOM
@@ -1293,6 +1325,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // Si le mode est déjà défini, initialiser le contrôleur
     if (window.toolboxMode) {
         toolboxController = new ToolboxController();
+        // Exposer l'instance à la fenêtre pour les boutons HTML
+        window.toolboxController = toolboxController;
     }
     
     // Gestionnaires d'événements
@@ -1415,8 +1449,6 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
     
-    // Rendre le contrôleur global pour les boutons inline
-    window.toolboxController = toolboxController;
     
     // Charger les prompts après un délai
     setTimeout(() => {
