@@ -1,258 +1,162 @@
-# 🔍 LLM Context Builder - Desktop Edition
+# 🚀 LLM Context Builder - Édition Desktop
 
-Application desktop pour préparer le contexte de vos projets de code pour l'analyse et la modification par LLM. Créez un contexte concis et bien formaté de vos projets, facilement partageable avec les LLMs.
+Une application de bureau complète pour préparer, analyser et interagir avec vos projets de code via des LLMs. Créez un contexte de projet sécurisé et optimisé, et dialoguez avec une IA grâce à une boîte à outils de développement intégrée.
 
-> 🛡️ **Sécurité** : Détecte et masque automatiquement les informations sensibles comme les clés API, identifiants et tokens pour éviter leur partage accidentel avec les LLMs.
+> 🛡️ **Sécurité avant tout** : Cet outil intègre un puissant mécanisme de détection et de masquage des secrets (clés API, mots de passe, tokens) pour prévenir toute fuite d'informations sensibles vers les modèles de langage.
 
-## 🚀 Fonctionnalités Principales
+![Aperçu de l'interface](https://github.com/user-attachments/assets/e2816992-9967-403a-b8d6-3df6e618a0e)
 
-- **📁 Scan Intelligent** : Parcourt récursivement les répertoires en respectant automatiquement les règles .gitignore
-- **🎨 Formatage Optimal** : Crée des blocs de code avec détection automatique du langage
-- **🌳 Visualisation Arborescente** : Génère une représentation visuelle de la structure du projet
-- **💻 Interface Desktop Native** : Application autonome avec sélecteur de fichiers système
-- **🔐 Protection des Données Sensibles** : Détecte et masque les clés API, mots de passe, tokens et autres identifiants
-- **📊 Estimation des Tokens** : Fournit un nombre approximatif de tokens pour les fenêtres de contexte LLM
-- **🧰 Toolbox Développeur** : Assistant IA avancé avec bibliothèque de prompts pour le développement
+## ✨ Fonctionnalités Clés
 
-## 📸 Aperçu
-
-![Interface principale](https://github.com/user-attachments/assets/e2816992-9967-403a-b8d6-3df66e618a0e)
-
-### Interface Desktop
-
-- **Sélection Native** : Dialogue système pour choisir un répertoire local
-- **Arbre de Fichiers Interactif** : Sélectionnez/désélectionnez les fichiers à inclure
-- **Instructions Personnalisées** : Ajoutez des instructions spécifiques au contexte
-- **Masquage des Secrets** : Activez/désactivez la protection des données sensibles
-- **Copie Rapide** : Copiez le contexte généré dans le presse-papiers
+- **🖥️ Application de Bureau Native** : Interface utilisateur web moderne (`Flask` + `pywebview`) encapsulée dans une application de bureau autonome pour une expérience fluide et intégrée.
+- **🧠 Scan de Projet Intelligent** : Analyse les répertoires locaux en respectant automatiquement les règles `.gitignore` et en filtrant les fichiers non pertinents (binaires, logs, etc.).
+- **🔐 Masquage de Secrets Avancé** : Utilise `detect-secrets` et des expressions régulières pour identifier et masquer les informations sensibles avant la génération du contexte.
+- **💾 Gestion de Conversations** : Sauvegardez, chargez, dupliquez et gérez vos sessions de chat. Le système inclut le contexte du projet et un **mécanisme de verrouillage** pour un travail multi-instances sécurisé.
+- **🧰 Toolbox Développeur Augmenté** : Un puissant assistant IA intégré avec deux modes :
+    - **Mode API** : Un client de chat direct avec votre LLM configuré (supporte OpenAI et Ollama), avec gestion de l'historique, streaming, et export des conversations.
+    - **Mode Navigateur** : Pilote une fenêtre de navigateur intégrée pour interagir avec des services comme ChatGPT, Gemini ou Claude AI directement depuis l'application.
+- **📚 Bibliothèque de Prompts** : Une collection de prompts prédéfinis et personnalisables pour des tâches complexes : analyse d'architecture, audit de sécurité, planification de fonctionnalités, etc.
+- **🔄 Intégration `git diff`** : Analysez en un clic les modifications en attente (`--staged`) pour générer des messages de commit ou obtenir des revues de code.
+- **📄 Export Multi-format** : Exportez vos conversations au format Markdown, DOCX ou PDF.
 
 ## ⚙️ Installation
 
 ### Prérequis
+- Windows (l'application est optimisée pour Windows via `run.bat`)
+- [Miniconda](https://docs.conda.io/en/latest/miniconda.html) ou Anaconda
 
-- Python 3.8+
-- Windows (pour l'exécution via `run.bat`)
+### Étapes d'installation
+1.  Clonez le dépôt :
+    ```bash
+    git clone https://github.com/Astral0/code-to-llm.git
+    cd code-to-llm
+    ```
+2.  Le script `run.bat` est conçu pour automatiser la configuration. Il va :
+    - Chercher votre installation Conda.
+    - Vérifier et activer l'environnement `code2llm` (il doit exister).
+    - Lancer l'application.
 
-### Installation Rapide
+    Si c'est la première fois, créez l'environnement Conda :
+    ```bash
+    conda create -n code2llm python=3.9
+    conda activate code2llm
+    pip install -r requirements.txt
+    ```
+3.  **Configuration Essentielle** :
+    Copiez `config.ini.template` vers `config.ini` et configurez-le. Pour utiliser la Toolbox, la section `[LLMServer]` est requise :
+    ```ini
+    [LLMServer]
+    # URL de l'API de votre LLM.
+    # Ex: https://api.openai.com/v1 ou http://localhost:11434 pour Ollama
+    url = YOUR_LLM_API_URL_HERE
+    
+    # Votre clé API (requise pour OpenAI, non nécessaire pour Ollama local)
+    apikey = YOUR_LLM_API_KEY_HERE
+    
+    # Modèle à utiliser
+    # Ex: gpt-4-turbo-preview, gpt-3.5-turbo, llama3, codellama
+    model = YOUR_LLM_MODEL_HERE
+    
+    # Type d'API : 'openai' ou 'ollama'
+    api_type = openai
+    
+    # Activer l'intégration LLM dans la Toolbox
+    enabled = true
+    
+    # Activer le streaming des réponses pour le chat
+    stream_response = true
+    ```
+4.  Lancez l'application en double-cliquant sur **`run.bat`**.
 
-```bash
-git clone https://github.com/Astral0/code-to-llm.git
-cd code-to-llm
-pip install -r requirements.txt
-```
+## 🚀 Guide d'Utilisation
 
-### Configuration
+1.  **Scanner un Projet** :
+    - Lancez l'application via `run.bat`.
+    - Cliquez sur **"Sélectionner un répertoire"** pour ouvrir la boîte de dialogue native.
+    - Choisissez votre projet et cliquez sur **"Scanner le répertoire"**.
+2.  **Sélectionner les Fichiers** :
+    - L'arbre des fichiers de votre projet (filtrés) apparaît.
+    - Cochez les fichiers et dossiers que vous souhaitez inclure dans le contexte.
+3.  **Générer le Contexte** :
+    - Dans la section 3, ajoutez des instructions initiales au LLM si nécessaire.
+    - Choisissez un mode de **Compression** si besoin (Mode Compact ou Résumé par IA).
+    - Cliquez sur **"Generate context for selection"**.
+4.  **Interagir avec l'IA** :
+    - Le contexte Markdown est généré et affiché.
+    - Cliquez sur **"Ouvrir la Toolbox"**.
+    - Choisissez votre mode (`API` ou `Navigateur Intégré`).
+    - Dans la Toolbox, cliquez sur **"Importer le contexte du projet"**.
+    - Vous pouvez maintenant utiliser les prompts ou discuter avec l'IA à propos de votre code.
 
-Créez `config.ini` à partir de `config.ini.template` et personnalisez-le :
+## 💾 Gestion Avancée des Conversations
 
-```ini
-[Instructions]
-instruction1_text = Ne fais rien, attends mes instructions.
-instruction2_text = Si des modifications du code source sont nécessaires, présente ta réponse sous forme de patch Linux.
+La Toolbox va au-delà d'un simple chat en proposant un système de sauvegarde complet, transformant chaque session en une "capsule temporelle" réutilisable.
 
-[LLMServer]
-url = YOUR_LLM_API_URL_HERE      # ex: https://api.openai.com/v1 ou http://localhost:11434
-apikey = YOUR_LLM_API_KEY_HERE   # Optionnel pour Ollama local, requis pour OpenAI
-model = YOUR_LLM_MODEL_HERE      # ex: gpt-3.5-turbo ou llama3
-api_type = openai                # 'openai' ou 'ollama'
-enabled = true                   # Active l'intégration LLM
-stream_response = true           # Active le streaming des réponses
-```
+### "Capsules Temporelles" de Conversation
+Chaque sauvegarde n'enregistre pas seulement l'historique des messages, mais aussi **l'intégralité du contexte du projet** tel qu'il était au moment de la conversation. Cela vous permet de reprendre une analyse ou un développement exactement là où vous l'aviez laissé, même si le code source a changé depuis.
 
-## 🚀 Utilisation
+### Système de Verrouillage Multi-Instance
+Pour garantir l'intégrité de vos données, un système de verrouillage intelligent est intégré :
+-   **Verrouillage Automatique** : Lorsque vous chargez ou sauvegardez une conversation, elle est automatiquement "verrouillée" par votre session.
+-   **Prévention des Conflits** : Si vous ouvrez la même conversation dans une autre fenêtre, elle apparaîtra comme verrouillée, vous empêchant de la modifier et d'écraser accidentellement des données.
+-   **Information Visuelle** : Des icônes claires indiquent le statut de chaque conversation (verrouillée par vous, par un autre, ou libre).
+-   **Gestion des Verrous** : Vous pouvez libérer manuellement vos verrous ou forcer la libération d'un verrou orphelin si une instance de l'application s'est mal fermée.
 
-### Lancement de l'Application
+### Fonctionnalités de l'Interface
+Depuis la barre latérale de la Toolbox, vous pouvez :
+-   **Sauvegarder** la conversation actuelle.
+-   **Charger** une conversation existante pour restaurer l'historique et le contexte.
+-   **Dupliquer** une conversation pour explorer une nouvelle piste d'analyse sans altérer l'original.
+-   **Renommer** vos conversations pour mieux les organiser.
+-   **Supprimer** les sessions dont vous n'avez plus besoin.
 
-Double-cliquez sur `run.bat` ou exécutez :
+## 🏗️ Architecture Technique
 
-```bash
-run.bat
-```
+Le projet adopte une architecture orientée services pour garantir la modularité, la testabilité et la clarté. La classe `Api` dans `main_desktop.py` sert de **façade**, orchestrant les appels aux différents services backend.
 
-L'application s'ouvre dans une fenêtre native avec interface web intégrée.
-
-### Workflow Type
-
-1. **Sélectionner un Répertoire** : Cliquez sur "Sélectionner un répertoire" pour choisir votre projet
-2. **Scanner** : L'application analyse le répertoire en respectant .gitignore
-3. **Choisir les Fichiers** : Sélectionnez les fichiers à inclure dans le contexte
-4. **Générer le Contexte** : Créez le document Markdown formaté
-5. **Utiliser la Toolbox** : Ouvrez la Toolbox Développeur pour l'analyse IA
-
-## 🧰 Toolbox Développeur
-
-La Toolbox est un assistant IA intégré offrant des fonctionnalités avancées :
-
-### Modes Disponibles
-
-#### Mode API
-- Communication directe avec l'API LLM configurée
-- Historique de conversation local
-- Export des conversations
-- Compteur de tokens en temps réel
-- Support du streaming
-
-#### Mode Navigateur Intégré
-- Ouvre les sites de chatbot (ChatGPT, Gemini, Claude) dans une fenêtre pywebview
-- Navigation sécurisée au sein de l'application
-- Idéal pour utiliser des services web sans quitter l'application
-
-### Prompts Prédéfinis
-
-Le répertoire `prompts/` contient des modèles optimisés :
-
-1. **Analyse Générale** (`01_analyse_generale.md`)
-   - Revue complète de l'architecture
-   - Identification des points forts et axes d'amélioration
-   - Résumé de la stack technique
-
-2. **Analyse de Sécurité** (`02_analyse_securite.md`)
-   - Audit de sécurité ciblé
-   - Évaluation des risques (Critique/Élevé/Moyen/Faible)
-   - Recommandations de sécurité
-
-3. **Planification de Fonctionnalité** (`03_plan_action_fonctionnalite.md`)
-   - Plans d'action détaillés
-   - Modifications de fichiers nécessaires
-   - Stratégie de test
-
-4. **Revue de Code** (`04_revue_de_diff.md`)
-   - Intégration automatique de `git diff`
-   - Évaluation de la qualité
-   - Suggestions d'amélioration
-
-### Personnalisation des Prompts
-
-Ajoutez vos propres prompts en créant des fichiers `.md` dans `prompts/` :
-
-```markdown
-# prompts/05_analyse_custom.md
-Votre prompt personnalisé ici...
-```
-
-## 🛡️ Sécurité et Protection des Données
-
-### Masquage Automatique
-
-L'outil détecte et masque automatiquement :
-- Clés API et tokens
-- Mots de passe et identifiants
-- Clés privées et certificats
-- Chaînes de connexion avec identifiants
-- Clés AWS et autres credentials cloud
-
-Exemple de masquage :
-```
-[LINE CONTAINING SENSITIVE DATA: api_key]
-```
-
-### Méthodes de Détection
-
-1. **Bibliothèque detect-secrets** : Détecteurs spécialisés pour différents types de secrets
-2. **Patterns Regex personnalisés** : Motifs supplémentaires pour formats courants
-
-## 📋 Format de Sortie
-
-Le contexte généré inclut :
-
-```
---- START CONTEXT ---
-Objective: Provide the complete context of a project...
-Security Note: Sensitive information has been masked...
-
---- START DIRECTORY TREE ---
-Project_Root/
-├── src/
-│   ├── main.py
-│   └── utils.py
-└── README.md
---- END DIRECTORY TREE ---
-
---- START FILE: src/main.py ---
-```python
-# Code content here
-```
---- END FILE: src/main.py ---
-```
-
-## 💡 Conseils d'Utilisation
-
-- **Sélection Ciblée** : Pour les gros projets, sélectionnez uniquement les fichiers pertinents
-- **Vérification Sécurité** : Toujours vérifier que les données sensibles sont masquées
-- **Gestion des Tokens** : Surveillez l'estimation pour rester dans les limites LLM
-- **Instructions Claires** : Ajoutez des instructions précises pour guider le LLM
+- **`main_desktop.py` (API Façade)** : Point d'entrée de l'application de bureau. Gère les fenêtres (`pywebview`), expose les méthodes Python au JavaScript et orchestre les services.
+- **`web_server.py` (Serveur Flask)** : Serveur local qui rend les templates HTML et fournit des endpoints API (principalement pour le mode web historique, mais utilisé par la fenêtre pywebview).
+- **`services/` (Logique Métier)** :
+    - `FileService` : Gère le scan des systèmes de fichiers, l'application des règles `.gitignore`, le filtrage des fichiers binaires et le **masquage des secrets**.
+    - `ContextBuilderService` : Assemble le contexte final en Markdown, génère l'arbre de fichiers et estime la taille en tokens.
+    - `LlmApiService` : Gère toute la communication avec les API LLM (OpenAI, Ollama), y compris la gestion du streaming et une stratégie de `retry` intelligente.
+    - `GitService` : Exécute les commandes Git, comme `git diff --staged`.
+    - `ExportService` : Gère l'export des conversations en Markdown, DOCX et PDF.
+- **`pywebview_driver.py` (Pilote Personnalisé)** : Un driver léger imitant l'API de Selenium pour interagir par programmation avec le contenu de la fenêtre de navigateur intégrée.
+- **`tests/` (Suite de Tests)** : Le projet inclut des tests unitaires (`pytest`) pour chaque service ainsi que des tests d'intégration pour la façade `Api`, garantissant la robustesse de l'application.
 
 ## 🔧 Configuration Avancée
 
-### Exclusion de Fichiers
+Le fichier `config.ini` permet une personnalisation fine :
 
-Par défaut, l'application ignore :
-- `.git/`, `__pycache__/`, `.gitignore`
-- `.vscode/`, `.idea/`, `.kilocode/`, `.claude/`
-- Fichiers binaires et médias
-- Fichiers de lock (`package-lock.json`, etc.)
+### Exclusion de Fichiers (`[FileExclusion]`)
 
-Personnalisez via `config.ini` :
+Excluez des fichiers ou des motifs de la sélection.
+
 ```ini
 [FileExclusion]
-file_blacklist = .DS_Store, Thumbs.db
-pattern_blacklist = *.min.js, *.min.css, *-lock.json
+# Fichiers spécifiques à exclure, séparés par des virgules
+file_blacklist = .DS_Store, Thumbs.db, yarn.lock
+# Motifs à exclure (supporte * et ?)
+pattern_blacklist = *.min.js, *-lock.json, *.pyc
 ```
 
-### Détection Binaire
+### Détection Binaire (`[BinaryDetection]`)
+
+Affinez la détection des fichiers binaires.
 
 ```ini
 [BinaryDetection]
-extension_blacklist = .exe, .dll, .so, .pdf, .zip
-extension_whitelist = .py, .js, .html, .css, .json
+# Extensions immédiatement rejetées
+extension_blacklist = .png, .jpg, .exe, .dll, .so, .pdf, .zip, .woff
+# Extensions immédiatement acceptées sans analyse de contenu
+extension_whitelist = .py, .js, .html, .css, .json, .md, .txt, .sh
 ```
-
-## 🏗️ Architecture
-
-L'application suit une architecture orientée services pour une meilleure modularité et testabilité :
-
-### Structure des Services
-
-```
-main_desktop.py (Api - Façade)
-├── GitService
-│   └── Exécution des commandes Git (diff)
-├── LlmApiService
-│   ├── Communication avec les APIs LLM
-│   └── Support du streaming avec retry intelligent
-├── FileService
-│   ├── Scan de répertoires avec gitignore
-│   ├── Filtrage des fichiers binaires
-│   └── Détection et masquage des secrets
-└── ContextBuilderService
-    ├── Construction du contexte formaté
-    ├── Génération de l'arbre des fichiers
-    └── Estimation des tokens
-```
-
-### Points Clés de l'Architecture
-
-- **Façade Pattern** : La classe `Api` expose une interface simple pour l'UI
-- **Dependency Injection** : Configuration centralisée injectée dans chaque service
-- **Separation of Concerns** : Chaque service a une responsabilité unique
-- **Testabilité** : Services isolés avec tests unitaires et d'intégration
-- **État Encapsulé** : FileService maintient l'état du scan (cache, répertoire courant)
-
-### Tests
-
-L'architecture inclut des tests complets :
-- Tests unitaires pour chaque service (`tests/test_*.py`)
-- Tests d'intégration pour la façade Api (`tests/test_api_integration.py`)
-- Mocks pour les dépendances externes (pywebview, requests)
 
 ## 🤝 Contribution
 
-Les contributions sont bienvenues ! N'hésitez pas à soumettre des Pull Requests.
+Les contributions sont les bienvenues ! Si vous souhaitez améliorer l'application, n'hésitez pas à forker le dépôt et à soumettre une Pull Request.
 
 ## 📄 Licence
 
-Ce projet est sous licence MIT - voir le fichier LICENSE pour plus de détails.
-
-## 🆘 Support
-
-Pour signaler des bugs ou demander des fonctionnalités, ouvrez une issue sur GitHub.
+Ce projet est sous licence MIT. Voir le fichier `LICENSE` pour plus de détails.
