@@ -192,6 +192,9 @@ class ToolboxController {
                 });
             }
         }
+        
+        // Mettre à jour l'état initial des boutons
+        this.updateButtonStates();
     }
     
     async checkStreamingStatus() {
@@ -338,7 +341,14 @@ class ToolboxController {
                         this.showError(result.error || 'Erreur lors de l\'import du contexte');
                     }
                 } else {
-                    this.showError('Aucun contexte disponible. Veuillez d\'abord générer un contexte depuis la fenêtre principale.');
+                    // NE PLUS AFFICHER D'ERREUR, METTRE L'UI A JOUR
+                    const contextStatus = document.getElementById('contextStatus');
+                    if (contextStatus) {
+                        contextStatus.classList.add('no-context');
+                        contextStatus.innerHTML = '<i class="fas fa-info-circle text-warning"></i> Aucun contexte importé. Scannez un projet ou chargez une conversation.';
+                    }
+                    // S'assurer que les boutons sont bien désactivés
+                    this.updateButtonStates();
                 }
             }
         } catch (error) {
