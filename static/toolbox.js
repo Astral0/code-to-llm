@@ -841,10 +841,62 @@ class ToolboxController {
         });
     }
     
+    _buildConversationPayload(title, isAiGenerated = false) {
+        const cleanTitle = title.replace(/[\r\n]+/g, ' ').trim().substring(0, 100);
+
+        return {
+            id: this.currentConversationId,
+            title: cleanTitle,
+            history: this.chatHistory,
+            context: {
+                fullContext: this.mainContext,
+                metadata: {
+                    projectPath: window.toolboxProjectPath || '',
+                    filesIncluded: 0,
+                    estimatedTokens: this.estimateTokens(this.mainContext)
+                }
+            },
+            metadata: {
+                mode: 'api',
+                tags: [],
+                ai_generated_title: isAiGenerated
+            }
+        };
+    }
+    
     async saveCurrentConversation() {
         // La garde est maintenant gérée par l'état du bouton (disabled)
         if (this.mode !== 'api' || !window.pywebview || !window.pywebview.api) return;
 
+        const saveBtn = document.getElementById('saveConversationBtn');
+        if (!saveBtn || saveBtn.disabled) return;
+
+        // Sauvegarde rapide si la conversation a déjà un ID
+        if (this.currentConversationId) {
+            const originalContent = saveBtn.innerHTML;
+            saveBtn.disabled = true;
+            saveBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Sauvegarde...';
+
+            try {
+                const conversationData = this._buildConversationPayload(this.conversationSummary, false);
+                const result = await window.pywebview.api.save_conversation(conversationData);
+
+                if (result.success) {
+                    this.appendMessageToChat('system', `Conversation sauvegardée: ${result.title}`);
+                    await this.loadConversations();
+                } else {
+                    this.showError(`Erreur lors de la sauvegarde: ${result.error}`);
+                }
+            } catch (error) {
+                this.showError(`Erreur lors de la sauvegarde: ${error}`);
+            } finally {
+                saveBtn.disabled = false;
+                saveBtn.innerHTML = originalContent;
+            }
+            return;
+        }
+
+        // Première sauvegarde - ouvrir la modale
         const modalElement = document.getElementById('saveConversationModal');
         const modal = new bootstrap.Modal(modalElement);
         const titleInput = document.getElementById('conversationTitleInput');
@@ -944,29 +996,13 @@ class ToolboxController {
                 return;
             }
 
-            const conversationData = {
-                id: this.currentConversationId,
-                title: cleanTitle,
-                history: this.chatHistory,
-                context: {
-                    fullContext: this.mainContext,
-                    metadata: {
-                        projectPath: window.toolboxProjectPath || '',
-                        filesIncluded: 0,
-                        estimatedTokens: this.estimateTokens(this.mainContext)
-                    }
-                },
-                metadata: {
-                    mode: 'api',
-                    tags: [],
-                    ai_generated_title: titleGeneratedByAI  // Marquer si le titre a été généré par IA
-                }
-            };
+            const conversationData = this._buildConversationPayload(cleanTitle, titleGeneratedByAI);
 
             try {
                 const result = await window.pywebview.api.save_conversation(conversationData);
                 if (result.success) {
                     this.currentConversationId = result.id;
+                    this.conversationSummary = result.title; // Mettre à jour le titre pour les sauvegardes rapides futures
                     this.appendMessageToChat('system', `Conversation sauvegardée: ${result.title}`);
                     await this.loadConversations();
                     modal.hide();

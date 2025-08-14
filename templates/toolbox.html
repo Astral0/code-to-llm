@@ -357,15 +357,20 @@
                                 <i class="fas fa-sync-alt"></i>
                             </button>
                         </h6>
+                        
+                        <!-- Boutons d'action remontés en haut -->
+                        <div class="mb-3">
+                            <button id="saveConversationBtn" class="btn btn-success btn-sm w-100 api-mode-only mb-2" disabled title="Commencez une conversation pour pouvoir la sauvegarder">
+                                <i class="fas fa-save"></i> Sauvegarder conversation actuelle
+                            </button>
+                            <button id="releaseLocksBtn" class="btn btn-warning btn-sm w-100 api-mode-only" title="Libérer tous vos verrous actifs">
+                                <i class="fas fa-unlock-alt"></i> Libérer mes verrous
+                            </button>
+                        </div>
+                        
                         <div id="conversationsList" class="mb-3">
                             <!-- La liste des conversations sera générée ici -->
                         </div>
-                        <button id="saveConversationBtn" class="btn btn-success btn-sm w-100 api-mode-only mb-2" disabled title="Commencez une conversation pour pouvoir la sauvegarder">
-                            <i class="fas fa-save"></i> Sauvegarder conversation actuelle
-                        </button>
-                        <button id="releaseLocksBtn" class="btn btn-warning btn-sm w-100 api-mode-only" title="Libérer tous vos verrous actifs">
-                            <i class="fas fa-unlock-alt"></i> Libérer mes verrous
-                        </button>
                     </div>
                 </div>
             </div>
