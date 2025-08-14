@@ -1256,22 +1256,32 @@ document.addEventListener('DOMContentLoaded', () => {
         textarea.style.height = (textarea.scrollHeight) + 'px'; // Ajuster à la hauteur du contenu
     }
 
+    // Fonction commune pour ouvrir la toolbox
+    const openToolbox = async () => {
+        console.log("DEBUG: Clic sur bouton Toolbox. window.pywebview existe?", !!window.pywebview);
+        
+        if (window.pywebview) {
+            // Mode Bureau - Ouvrir la modale de sélection du mode
+            console.log("Mode Bureau détecté. Ouverture de la modale de sélection");
+            const modal = new bootstrap.Modal(document.getElementById('toolboxModeModal'));
+            modal.show();
+            // En mode Desktop, le bouton reste visible pour permettre de rouvrir la Toolbox
+        } else {
+            // Mode Web - Cacher le bouton en mode Web car la fonctionnalité n'est pas disponible
+            console.log("Mode Web détecté. La Toolbox n'est disponible qu'en mode Desktop.");
+            alert("La Toolbox Développeur n'est disponible qu'en mode Desktop.");
+        }
+    };
+
+    // Gestionnaire pour le bouton du haut
     if (startLlmChatBtn) {
-        startLlmChatBtn.addEventListener('click', async () => {
-            console.log("DEBUG: Clic sur startLlmChatBtn. window.pywebview existe?", !!window.pywebview);
-            
-            if (window.pywebview) {
-                // Mode Bureau - Ouvrir la modale de sélection du mode
-                console.log("Mode Bureau détecté. Ouverture de la modale de sélection");
-                const modal = new bootstrap.Modal(document.getElementById('toolboxModeModal'));
-                modal.show();
-                // En mode Desktop, le bouton reste visible pour permettre de rouvrir la Toolbox
-            } else {
-                // Mode Web - Cacher le bouton en mode Web car la fonctionnalité n'est pas disponible
-                console.log("Mode Web détecté. La Toolbox n'est disponible qu'en mode Desktop.");
-                alert("La Toolbox Développeur n'est disponible qu'en mode Desktop.");
-            }
-        });
+        startLlmChatBtn.addEventListener('click', openToolbox);
+    }
+    
+    // Gestionnaire pour le bouton du bas
+    const startLlmChatBtnBottom = document.getElementById('startLlmChatBtnBottom');
+    if (startLlmChatBtnBottom) {
+        startLlmChatBtnBottom.addEventListener('click', openToolbox);
     }
     
     // Fonction pour ouvrir la Toolbox dans le mode choisi

@@ -203,18 +203,125 @@
         body[data-mode="api"] .browser-mode-only {
             display: none !important;
         }
+        
+        /* Styles pour les conversations */
+        .conversation-item {
+            padding: 8px 12px;
+            margin-bottom: 8px;
+            border: 1px solid #dee2e6;
+            border-radius: 6px;
+            background-color: #f8f9fa;
+            cursor: pointer;
+            transition: all 0.2s;
+            position: relative;
+        }
+        
+        .conversation-item:hover {
+            background-color: #e9ecef;
+            border-color: #adb5bd;
+        }
+        
+        .conversation-item.active {
+            background-color: #e3f2fd;
+            border-color: #2196f3;
+        }
+        
+        .conversation-item .title {
+            font-weight: 500;
+            margin-bottom: 4px;
+            padding-right: 25px;
+        }
+        
+        .conversation-item .meta {
+            font-size: 0.8rem;
+            color: #6c757d;
+        }
+        
+        .conversation-item .lock-icon {
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            font-size: 1rem;
+        }
+        
+        .conversation-item .lock-icon.locked-by-me {
+            color: #28a745;
+        }
+        
+        .conversation-item .lock-icon.locked-by-other {
+            color: #ffc107;
+        }
+        
+        .conversation-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .conversation-header .title {
+            flex-grow: 1;
+            cursor: pointer;
+            text-decoration: underline dotted;
+            transition: color 0.2s;
+        }
+        
+        .conversation-header .title:hover {
+            color: #0056b3;
+        }
+        
+        .lock-icon-btn {
+            color: #ffc107;
+            line-height: 1;
+            transition: color 0.2s;
+        }
+        
+        .lock-icon-btn:hover {
+            color: #e0a800;
+            transform: scale(1.1);
+        }
+        
+        .conversation-actions {
+            margin-top: 4px;
+            display: none;
+        }
+        
+        .conversation-item:hover .conversation-actions {
+            display: flex;
+            gap: 4px;
+        }
+        
+        .conversation-actions button {
+            padding: 2px 8px;
+            font-size: 0.75rem;
+        }
+        
+        #conversationsList {
+            max-height: 300px;
+            overflow-y: auto;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            padding: 8px;
+            background-color: #fafafa;
+        }
     </style>
 </head>
 <body>
     <div class="container-fluid toolbox-container mt-3">
         <header class="pb-3 mb-3 border-bottom">
-            <h2 class="mb-0"><i class="fas fa-toolbox text-primary"></i> Toolbox Développeur Augmenté</h2>
-            <p class="text-muted mb-0">Assistant IA pour l'analyse et le développement de votre projet</p>
+            <div class="d-flex justify-content-between align-items-start">
+                <div>
+                    <h2 class="mb-0"><i class="fas fa-toolbox text-primary"></i> Toolbox Développeur Augmenté</h2>
+                    <p class="text-muted mb-0">Assistant IA pour l'analyse et le développement de votre projet</p>
+                </div>
+                <button id="closeToolboxBtn" class="btn btn-danger" title="Fermer la Toolbox">
+                    <i class="fas fa-times"></i> Fermer
+                </button>
+            </div>
         </header>
 
         <div class="row">
             <!-- Panneau latéral - Bibliothèque de prompts -->
-            <div class="col-md-3">
+            <div class="col-md-4">
                 <div class="prompt-library p-3">
                     <h5 class="mb-3"><i class="fas fa-book"></i> Bibliothèque de Prompts</h5>
                     
@@ -239,11 +346,32 @@
                     <button id="gitDiffBtn" class="btn btn-secondary w-100 mt-3">
                         <i class="fas fa-code-branch"></i> Analyser mes dernières modifications (git diff)
                     </button>
+
+                    <hr class="mt-4">
+
+                    <!-- Section Conversations -->
+                    <div id="conversationsSection">
+                        <h6 class="mb-3">
+                            <i class="fas fa-comments"></i> Conversations sauvegardées
+                            <button class="btn btn-sm btn-outline-primary float-end" id="refreshConversationsBtn" title="Rafraîchir">
+                                <i class="fas fa-sync-alt"></i>
+                            </button>
+                        </h6>
+                        <div id="conversationsList" class="mb-3">
+                            <!-- La liste des conversations sera générée ici -->
+                        </div>
+                        <button id="saveConversationBtn" class="btn btn-success btn-sm w-100 api-mode-only mb-2">
+                            <i class="fas fa-save"></i> Sauvegarder conversation actuelle
+                        </button>
+                        <button id="releaseLocksBtn" class="btn btn-warning btn-sm w-100 api-mode-only" title="Libérer tous vos verrous actifs">
+                            <i class="fas fa-unlock-alt"></i> Libérer mes verrous
+                        </button>
+                    </div>
                 </div>
             </div>
 
             <!-- Zone principale - Chat -->
-            <div class="col-md-9">
+            <div class="col-md-8">
                 <div class="chat-container">
                     <!-- Zone de notification pour le mode navigateur -->
                     <div id="browserModeNotification" class="browser-mode-only d-none p-4">
