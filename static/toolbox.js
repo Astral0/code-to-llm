@@ -195,6 +195,7 @@ class ToolboxController {
         
         // Mettre à jour l'état initial des boutons
         this.updateButtonStates();
+        this.updateSaveButtonState();
     }
     
     async checkStreamingStatus() {
@@ -287,6 +288,19 @@ class ToolboxController {
         }
     }
     
+    updateSaveButtonState() {
+        const saveBtn = document.getElementById('saveConversationBtn');
+        if (saveBtn) {
+            if (this.chatHistory.length === 0) {
+                saveBtn.disabled = true;
+                saveBtn.title = 'Commencez une conversation pour pouvoir la sauvegarder';
+            } else {
+                saveBtn.disabled = false;
+                saveBtn.title = 'Sauvegarder la conversation actuelle';
+            }
+        }
+    }
+    
     updateButtonStates() {
         const hasContext = this.mainContext && this.mainContext.trim() !== '';
         
@@ -337,6 +351,7 @@ class ToolboxController {
                         
                         // Activer les boutons
                         this.updateButtonStates();
+                        this.updateSaveButtonState();
                     } else {
                         this.showError(result.error || 'Erreur lors de l\'import du contexte');
                     }
@@ -371,6 +386,8 @@ class ToolboxController {
         // Désactiver l'interface
         const sendBtn = document.getElementById('sendChatMessageBtn');
         const input = document.getElementById('chatMessageInput');
+        
+        this.updateSaveButtonState();
         if (sendBtn) sendBtn.disabled = true;
         if (input) input.disabled = true;
         
@@ -481,6 +498,9 @@ class ToolboxController {
                     if (tokenSpan) tokenSpan.textContent = total_tokens.toLocaleString();
                 }
                 
+                // Réactiver le bouton de sauvegarde après une réponse
+                this.updateSaveButtonState();
+                
                 // Nettoyage
                 delete window.onStreamStart;
                 delete window.onStreamChunk;
@@ -495,6 +515,8 @@ class ToolboxController {
                 if (streamingDiv) {
                     streamingDiv.remove();
                 }
+                // Ré-évaluer l'état du bouton de sauvegarde même en cas d'erreur
+                this.updateSaveButtonState();
                 this.appendMessageToChat('system-error', `Erreur: ${error}`);
                 // Nettoyage
                 delete window.onStreamStart;
@@ -719,6 +741,8 @@ class ToolboxController {
             if (tokenSpan) {
                 tokenSpan.textContent = '0';
             }
+            
+            this.updateSaveButtonState();
         }
     }
     
@@ -818,44 +842,156 @@ class ToolboxController {
     }
     
     async saveCurrentConversation() {
+        // La garde est maintenant gérée par l'état du bouton (disabled)
         if (this.mode !== 'api' || !window.pywebview || !window.pywebview.api) return;
+
+        const modalElement = document.getElementById('saveConversationModal');
+        const modal = new bootstrap.Modal(modalElement);
+        const titleInput = document.getElementById('conversationTitleInput');
+        const suggestBtn = document.getElementById('suggestTitleBtn');
+        const spinner = document.getElementById('title-suggestion-spinner');
+        const confirmSaveBtn = document.getElementById('confirmSaveBtn');
+        const charCountSpan = document.getElementById('titleCharCount');
+
+        // Variable pour traquer si le titre a été généré par IA
+        let titleGeneratedByAI = false;
+
+        // Réinitialiser la modale
+        titleInput.value = this.conversationSummary || '';
+        titleInput.placeholder = 'Nouvelle conversation';
+        titleInput.disabled = false;
+        suggestBtn.classList.remove('d-none');
+        spinner.classList.add('d-none');
+        confirmSaveBtn.disabled = false;
         
-        const title = prompt('Titre de la conversation:', this.conversationSummary || 'Nouvelle conversation');
-        if (!title) return;
-        
-        // Nettoyer le titre : enlever les sauts de ligne et limiter la longueur
-        const cleanTitle = title.replace(/[\r\n]+/g, ' ').trim().substring(0, 100);
-        
-        const conversationData = {
-            id: this.currentConversationId,
-            title: cleanTitle,
-            history: this.chatHistory,
-            context: {
-                fullContext: this.mainContext,
-                metadata: {
-                    projectPath: window.toolboxProjectPath || '',
-                    filesIncluded: 0,
-                    estimatedTokens: this.estimateTokens(this.mainContext)
+        // Mettre à jour le compteur de caractères
+        if (charCountSpan) {
+            const updateCharCount = () => {
+                const length = titleInput.value.length;
+                charCountSpan.textContent = `${length} / 100 caractères`;
+                if (length > 90) {
+                    charCountSpan.classList.add('text-warning');
+                } else {
+                    charCountSpan.classList.remove('text-warning');
                 }
-            },
-            metadata: {
-                mode: 'api',
-                tags: []
+                // Si l'utilisateur modifie le titre, ce n'est plus généré par IA
+                titleGeneratedByAI = false;
+            };
+            updateCharCount();
+            titleInput.addEventListener('input', updateCharCount);
+        }
+        
+        modal.show();
+        titleInput.focus();
+        titleInput.select();
+
+        // Gérer le bouton de suggestion IA
+        const handleSuggest = async () => {
+            // Afficher le spinner et désactiver les contrôles
+            suggestBtn.classList.add('d-none');
+            spinner.classList.remove('d-none');
+            titleInput.disabled = true;
+            confirmSaveBtn.disabled = true;
+
+            try {
+                const titleResult = await window.pywebview.api.generate_conversation_title(this.chatHistory);
+                if (titleResult.success && titleResult.title) {
+                    titleInput.value = titleResult.title;
+                    titleGeneratedByAI = true; // Marquer que le titre vient de l'IA
+                    // Mettre à jour le compteur
+                    if (charCountSpan) {
+                        const length = titleInput.value.length;
+                        charCountSpan.textContent = `${length} / 100 caractères`;
+                        if (length > 90) {
+                            charCountSpan.classList.add('text-warning');
+                        } else {
+                            charCountSpan.classList.remove('text-warning');
+                        }
+                    }
+                } else {
+                    // Gérer le cas où la suggestion échoue
+                    this.showError('Impossible de générer un titre. Veuillez saisir manuellement.');
+                    titleInput.placeholder = "Saisissez un titre...";
+                }
+            } catch (error) {
+                console.error('Erreur lors de la génération du titre:', error);
+                this.showError(`Erreur de génération: ${error.message || error}`);
+            } finally {
+                // Toujours réactiver les contrôles à la fin
+                spinner.classList.add('d-none');
+                suggestBtn.classList.remove('d-none');
+                titleInput.disabled = false;
+                confirmSaveBtn.disabled = false;
+                titleInput.focus();
+                titleInput.select();
+            }
+        };
+
+        suggestBtn.onclick = handleSuggest;
+
+        // Gérer le clic sur le bouton de sauvegarde final
+        const handleSave = async () => {
+            const finalTitle = titleInput.value.trim() || titleInput.placeholder;
+
+            // Nettoyer le titre : enlever les sauts de ligne et limiter la longueur
+            const cleanTitle = finalTitle.replace(/[\r\n]+/g, ' ').trim().substring(0, 100);
+
+            if (!cleanTitle) {
+                alert('Le titre ne peut pas être vide');
+                return;
+            }
+
+            const conversationData = {
+                id: this.currentConversationId,
+                title: cleanTitle,
+                history: this.chatHistory,
+                context: {
+                    fullContext: this.mainContext,
+                    metadata: {
+                        projectPath: window.toolboxProjectPath || '',
+                        filesIncluded: 0,
+                        estimatedTokens: this.estimateTokens(this.mainContext)
+                    }
+                },
+                metadata: {
+                    mode: 'api',
+                    tags: [],
+                    ai_generated_title: titleGeneratedByAI  // Marquer si le titre a été généré par IA
+                }
+            };
+
+            try {
+                const result = await window.pywebview.api.save_conversation(conversationData);
+                if (result.success) {
+                    this.currentConversationId = result.id;
+                    this.appendMessageToChat('system', `Conversation sauvegardée: ${result.title}`);
+                    await this.loadConversations();
+                    modal.hide();
+                } else {
+                    this.showError(`Erreur lors de la sauvegarde: ${result.error}`);
+                }
+            } catch (error) {
+                this.showError(`Erreur lors de la sauvegarde: ${error}`);
+            }
+        };
+
+        // Attacher le gestionnaire d'événements
+        confirmSaveBtn.onclick = handleSave;
+        
+        // Permettre la sauvegarde avec Enter
+        titleInput.onkeypress = (e) => {
+            if (e.key === 'Enter' && !confirmSaveBtn.disabled) {
+                handleSave();
             }
         };
         
-        try {
-            const result = await window.pywebview.api.save_conversation(conversationData);
-            if (result.success) {
-                this.currentConversationId = result.id;
-                this.appendMessageToChat('system', `Conversation sauvegardée: ${result.title}`);
-                await this.loadConversations();
-            } else {
-                this.showError(`Erreur lors de la sauvegarde: ${result.error}`);
-            }
-        } catch (error) {
-            this.showError(`Erreur lors de la sauvegarde: ${error}`);
-        }
+        // Nettoyer les gestionnaires lors de la fermeture
+        modalElement.addEventListener('hidden.bs.modal', () => {
+            suggestBtn.onclick = null;
+            confirmSaveBtn.onclick = null;
+            titleInput.onkeypress = null;
+            titleInput.removeEventListener('input', titleInput.oninput);
+        }, { once: true });
     }
     
     async loadConversation(conversationId) {

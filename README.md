@@ -11,7 +11,7 @@ Une application de bureau complète pour préparer, analyser et interagir avec v
 - **🖥️ Application de Bureau Native** : Interface utilisateur web moderne (`Flask` + `pywebview`) encapsulée dans une application de bureau autonome pour une expérience fluide et intégrée.
 - **🧠 Scan de Projet Intelligent** : Analyse les répertoires locaux en respectant automatiquement les règles `.gitignore` et en filtrant les fichiers non pertinents (binaires, logs, etc.).
 - **🔐 Masquage de Secrets Avancé** : Utilise `detect-secrets` et des expressions régulières pour identifier et masquer les informations sensibles avant la génération du contexte.
-- **💾 Gestion de Conversations** : Sauvegardez, chargez, dupliquez et gérez vos sessions de chat. Le système inclut le contexte du projet et un **mécanisme de verrouillage** pour un travail multi-instances sécurisé.
+- **💾 Gestion de Conversations** : Sauvegardez, chargez, dupliquez et gérez vos sessions de chat avec **génération automatique de titre par IA**. Le système inclut le contexte du projet et un **mécanisme de verrouillage** pour un travail multi-instances sécurisé.
 - **🧰 Toolbox Développeur Augmenté** : Un puissant assistant IA intégré avec deux modes :
     - **Mode API** : Un client de chat direct avec votre LLM configuré (supporte OpenAI et Ollama), avec gestion de l'historique, streaming, et export des conversations.
     - **Mode Navigateur** : Pilote une fenêtre de navigateur intégrée pour interagir avec des services comme ChatGPT, Gemini ou Claude AI directement depuis l'application.
@@ -65,6 +65,10 @@ Une application de bureau complète pour préparer, analyser et interagir avec v
     
     # Activer le streaming des réponses pour le chat
     stream_response = true
+    
+    # Paramètres optionnels pour contrôler la génération (décommentez si nécessaire)
+    # temperature = 0.7  # Contrôle la créativité (0.0 = déterministe, 1.0 = très créatif)
+    # max_tokens = 4096  # Nombre maximum de tokens pour la réponse
     ```
 4.  Lancez l'application en double-cliquant sur **`run.bat`**.
 
@@ -91,6 +95,12 @@ Une application de bureau complète pour préparer, analyser et interagir avec v
 ## 💾 Gestion Avancée des Conversations
 
 La Toolbox va au-delà d'un simple chat en proposant un système de sauvegarde complet, transformant chaque session en une "capsule temporelle" réutilisable.
+
+### 🎯 Génération Automatique de Titres par IA
+Lors de la sauvegarde d'une conversation, vous pouvez :
+- **Saisir manuellement** un titre descriptif
+- **Utiliser la baguette magique** 🪄 pour obtenir une suggestion de titre générée par l'IA qui analyse le contenu de votre conversation
+- L'IA effectue une **analyse sémantique** en ignorant les blocs de code pour se concentrer sur le sujet principal de la discussion
 
 ### "Capsules Temporelles" de Conversation
 Chaque sauvegarde n'enregistre pas seulement l'historique des messages, mais aussi **l'intégralité du contexte du projet** tel qu'il était au moment de la conversation. Cela vous permet de reprendre une analyse ou un développement exactement là où vous l'aviez laissé, même si le code source a changé depuis.
@@ -128,6 +138,29 @@ Le projet adopte une architecture orientée services pour garantir la modularit�
 ## 🔧 Configuration Avancée
 
 Le fichier `config.ini` permet une personnalisation fine :
+
+### Configuration de la Génération de Titres par IA (`[TitleGeneratorLLM]`)
+
+Configuration optionnelle pour personnaliser la génération automatique de titres. Si cette section est absente, le système utilise automatiquement la configuration de `[LLMServer]`.
+
+```ini
+[TitleGeneratorLLM]
+# Activer/désactiver la fonctionnalité
+enabled = true
+
+# Configuration spécifique (optionnelle, utilise LLMServer si non définie)
+# url = YOUR_TITLE_LLM_API_URL_HERE
+# apikey = YOUR_TITLE_LLM_API_KEY_HERE
+# model = gpt-3.5-turbo  # Modèle plus léger pour la génération de titres
+
+# Prompt personnalisé pour la génération
+title_prompt = Génère un titre court et descriptif...
+
+# Paramètres de génération
+max_title_length = 100
+timeout_seconds = 15
+# temperature = 0.5  # Plus déterministe pour les titres
+```
 
 ### Exclusion de Fichiers (`[FileExclusion]`)
 

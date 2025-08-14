@@ -178,3 +178,6 @@ config.ini
 
 # Claude Code local settings
 .claude/
+
+# tmp
+tmp/
