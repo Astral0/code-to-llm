@@ -760,19 +760,20 @@ class Api:
             logging.error(f"Erreur lors de l'appel au LLM: {str(e)}")
             return {'error': str(e)}
     
-    def generate_conversation_title(self, chat_history):
+    def generate_conversation_title(self, chat_history, main_context=None):
         """
         Demande au service LLM de générer un titre basé sur l'historique.
         
         Args:
             chat_history: L'historique de la conversation.
+            main_context: Le contexte principal du projet (optionnel).
         
         Returns:
             Un dictionnaire avec le titre suggéré.
         """
         try:
             self.logger.info("Génération d'un titre pour la conversation")
-            suggested_title = self.llm_service.generate_title(chat_history)
+            suggested_title = self.llm_service.generate_title(chat_history, main_context)
             
             if suggested_title:
                 self.logger.info(f"Titre généré avec succès: {suggested_title}")

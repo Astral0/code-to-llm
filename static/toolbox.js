@@ -894,7 +894,10 @@ class ToolboxController {
             confirmSaveBtn.disabled = true;
 
             try {
-                const titleResult = await window.pywebview.api.generate_conversation_title(this.chatHistory);
+                const titleResult = await window.pywebview.api.generate_conversation_title(
+                    this.chatHistory,
+                    this.mainContext  // Passer le contexte principal
+                );
                 if (titleResult.success && titleResult.title) {
                     titleInput.value = titleResult.title;
                     titleGeneratedByAI = true; // Marquer que le titre vient de l'IA

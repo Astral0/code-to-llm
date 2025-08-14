@@ -506,17 +506,65 @@ class LlmApiService(BaseService):
             self.logger.error(f"Erreur lors de la lecture de la configuration: {e}")
             return None
     
-    def generate_title(self, chat_history: List[Dict[str, str]]) -> str:
+    def extract_project_name(self, main_context: str) -> str:
+        """
+        Extrait le nom du projet depuis le contexte principal.
+        
+        Recherche les patterns suivants (par ordre de priorité):
+        1. "# Contexte du projet - {nom}"
+        2. "# Project Context - {nom}"
+        3. Premier titre de niveau 1 ou 2
+        
+        Args:
+            main_context: Le contexte complet du projet
+            
+        Returns:
+            Le nom du projet ou une chaîne vide
+        """
+        if not main_context:
+            return ""
+        
+        # Pattern 1: Format français
+        match = re.search(r'#\s*Contexte du projet\s*[-–]\s*(.+?)(?:\n|$)', main_context, re.IGNORECASE)
+        if match:
+            return match.group(1).strip()
+        
+        # Pattern 2: Format anglais
+        match = re.search(r'#\s*Project Context\s*[-–]\s*(.+?)(?:\n|$)', main_context, re.IGNORECASE)
+        if match:
+            return match.group(1).strip()
+        
+        # Pattern 3: Premier titre de niveau 1 ou 2
+        match = re.search(r'^#{1,2}\s+(.+?)(?:\n|$)', main_context, re.MULTILINE)
+        if match:
+            # Nettoyer le titre (enlever les parties après - ou :)
+            title = match.group(1).strip()
+            # Si le titre contient un séparateur, prendre la partie après
+            if ' - ' in title:
+                title = title.split(' - ', 1)[1]
+            elif ': ' in title:
+                title = title.split(': ', 1)[1]
+            return title.strip()
+        
+        return ""
+    
+    def generate_title(self, chat_history: List[Dict[str, str]], main_context: Optional[str] = None) -> str:
         """
         Génère un titre pour une conversation en utilisant le LLM.
         
         Args:
             chat_history: L'historique de la conversation à résumer.
+            main_context: Le contexte complet du projet pour en extraire le nom.
             
         Returns:
-            Le titre suggéré par le LLM, ou une chaîne vide en cas d'échec.
+            Le titre suggéré par le LLM préfixé par le nom du projet, ou une chaîne vide en cas d'échec.
         """
         try:
+            # Extraire le nom du projet
+            project_name = self.extract_project_name(main_context)
+            if project_name:
+                self.logger.info(f"Nom du projet extrait: '{project_name}'")
+            
             # Récupérer la configuration avec fallback
             title_config = self._get_title_generation_config()
             
@@ -638,12 +686,29 @@ class LlmApiService(BaseService):
                 if title.lower().startswith(prefix.lower()):
                     title = title[len(prefix):].strip()
             
-            # Tronquer si trop long
-            if len(title) > title_config['max_length']:
-                title = title[:title_config['max_length']] + '...'
+            # Construire le titre final avec le nom du projet
+            if project_name and title:
+                # Format: "NomProjet: Titre"
+                final_title = f"{project_name}: {title}"
+                self.logger.info(f"Titre avec préfixe projet: '{final_title}'")
+            else:
+                final_title = title
             
-            self.logger.info(f"Titre généré avec succès: '{title}'")
-            return title
+            # Vérifier la longueur et tronquer si nécessaire
+            max_length = title_config['max_length']
+            if len(final_title) > max_length:
+                # Tronquer intelligemment en gardant le nom du projet
+                if project_name and len(project_name) < max_length - 10:
+                    # Garder le nom du projet et tronquer le titre
+                    remaining = max_length - len(project_name) - 2  # -2 pour ": "
+                    truncated_title = title[:remaining-3] + "..."
+                    final_title = f"{project_name}: {truncated_title}"
+                else:
+                    # Tronquer normalement
+                    final_title = final_title[:max_length-3] + "..."
+            
+            self.logger.info(f"Titre final généré: '{final_title}'")
+            return final_title
             
         except requests.exceptions.Timeout:
             timeout_val = title_config.get('timeout', 15) if title_config else 15
