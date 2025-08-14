@@ -58,6 +58,34 @@ class LlmApiService(BaseService):
         """Retourne la configuration LLM injectée."""
         return self._llm_config
     
+    def _build_openai_request(self, api_url: str, model: str, messages: List[Dict[str, str]], 
+                              stream: bool = False, temperature: float = None, 
+                              max_tokens: int = None) -> tuple:
+        """
+        Construit une requête pour une API compatible OpenAI.
+        
+        Returns:
+            tuple: (target_url, payload)
+        """
+        payload = {
+            "model": model,
+            "messages": messages,
+            "stream": stream
+        }
+        
+        # Ajouter les paramètres optionnels s'ils sont définis
+        if temperature is not None:
+            payload['temperature'] = temperature
+        if max_tokens is not None:
+            payload['max_tokens'] = max_tokens
+            
+        # Construire l'URL complète
+        target_url = api_url.rstrip('/')
+        if not target_url.endswith('/chat/completions'):
+            target_url += '/chat/completions' if '/v1' in target_url else '/v1/chat/completions'
+            
+        return target_url, payload
+    
     def _prepare_request(self, chat_history: List[Dict[str, str]], stream: bool = False) -> tuple:
         """
         Prépare les données pour la requête LLM.
@@ -78,20 +106,15 @@ class LlmApiService(BaseService):
             headers["Authorization"] = f"Bearer {llm_config['apikey']}"
         
         if llm_config['api_type'] == "openai":
-            payload = {
-                "model": llm_config['model'],
-                "messages": chat_history,
-                "stream": stream
-            }
-            # Ajouter les paramètres optionnels s'ils sont présents dans la config
-            if 'temperature' in llm_config and llm_config['temperature'] is not None:
-                payload['temperature'] = llm_config['temperature']
-            if 'max_tokens' in llm_config and llm_config['max_tokens'] is not None:
-                payload['max_tokens'] = llm_config['max_tokens']
-                
-            target_url = llm_config['url'].rstrip('/')
-            if not target_url.endswith('/chat/completions'):
-                target_url += '/chat/completions' if '/v1' in target_url else '/v1/chat/completions'
+            # Utiliser la méthode factorisée
+            target_url, payload = self._build_openai_request(
+                api_url=llm_config['url'],
+                model=llm_config['model'],
+                messages=chat_history,
+                stream=stream,
+                temperature=llm_config.get('temperature'),
+                max_tokens=llm_config.get('max_tokens')
+            )
         else:  # ollama
             prompt = "\n\n".join([f"{msg['role'].upper()}: {msg['content']}" for msg in chat_history])
             payload = {
@@ -411,9 +434,7 @@ class LlmApiService(BaseService):
             cleaned_content = re.sub(r'\n{3,}', '\n\n', cleaned_content)
             cleaned_content = re.sub(r'[ \t]{2,}', ' ', cleaned_content)
             
-            # Limiter la longueur de chaque message pour économiser les tokens
-            if len(cleaned_content) > 500:
-                cleaned_content = cleaned_content[:500] + '...'
+            # Ne pas tronquer ici - la troncature sera faite lors du formatage final
             
             cleaned_history.append({
                 'role': message['role'],
@@ -512,8 +533,9 @@ class LlmApiService(BaseService):
                 cleaned_history = cleaned_history[:5] + cleaned_history[-5:]
             
             # Formater l'historique pour l'inclure dans le prompt
+            # Tronquer chaque message à 300 caractères pour économiser les tokens
             formatted_history = "\n".join([
-                f"- {msg['role'].capitalize()}: {msg['content'][:200]}..." if len(msg['content']) > 200 
+                f"- {msg['role'].capitalize()}: {msg['content'][:300]}..." if len(msg['content']) > 300 
                 else f"- {msg['role'].capitalize()}: {msg['content']}"
                 for msg in cleaned_history
             ])
@@ -533,19 +555,15 @@ class LlmApiService(BaseService):
             self.logger.info(f"Configuration de génération de titre - api_type: {title_config.get('api_type', 'NON DÉFINI')}")
             
             if title_config['api_type'] == "openai":
-                payload = {
-                    "model": title_config['model'],
-                    "messages": title_request_history,
-                    "stream": False
-                }
-                # Ajouter les paramètres optionnels s'ils sont définis dans la config
-                if title_config.get('temperature') is not None:
-                    payload['temperature'] = title_config['temperature']
-                if title_config.get('max_tokens') is not None:
-                    payload['max_tokens'] = title_config['max_tokens']
-                target_url = title_config['api_url'].rstrip('/')
-                if not target_url.endswith('/chat/completions'):
-                    target_url += '/chat/completions' if '/v1' in target_url else '/v1/chat/completions'
+                # Utiliser la méthode factorisée
+                target_url, payload = self._build_openai_request(
+                    api_url=title_config['api_url'],
+                    model=title_config['model'],
+                    messages=title_request_history,
+                    stream=False,
+                    temperature=title_config.get('temperature'),
+                    max_tokens=title_config.get('max_tokens')
+                )
             else:  # ollama
                 prompt = title_request_history[0]['content']
                 payload = {

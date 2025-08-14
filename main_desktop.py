@@ -92,6 +92,43 @@ def load_config():
 CONFIG = load_config()
 
 # Charger les configurations spécifiques aux services
+def safe_parse_config_value(config, section, option, value_type=str, default=None):
+    """
+    Parse de manière sûre une valeur de configuration en gérant les commentaires inline.
+    
+    Args:
+        config: ConfigParser instance
+        section: Section du fichier config
+        option: Option à lire
+        value_type: Type attendu (str, int, float, bool)
+        default: Valeur par défaut si le parsing échoue
+        
+    Returns:
+        La valeur parsée ou default
+    """
+    if not config.has_option(section, option):
+        return default
+        
+    try:
+        value = config.get(section, option)
+        
+        # Nettoyer les commentaires inline si présents
+        if '#' in value:
+            value = value.split('#')[0].strip()
+            
+        if value_type == bool:
+            return config.getboolean(section, option, fallback=default)
+        elif value_type == int:
+            return int(value)
+        elif value_type == float:
+            return float(value)
+        else:
+            return value
+            
+    except (ValueError, TypeError) as e:
+        logging.warning(f"Impossible de parser {section}.{option}='{value}' comme {value_type.__name__}: {e}")
+        return default
+
 def load_service_configs():
     """Charge les configurations spécifiques pour chaque service"""
     config = configparser.ConfigParser()
@@ -124,21 +161,13 @@ def load_service_configs():
             }
             
             # Ajouter les paramètres optionnels s'ils existent
-            if config.has_option('LLMServer', 'temperature'):
-                try:
-                    llm_config['temperature'] = config.getfloat('LLMServer', 'temperature')
-                except ValueError:
-                    pass  # Ignorer si la valeur n'est pas un float valide
-                    
-            if config.has_option('LLMServer', 'max_tokens'):
-                try:
-                    value = config.get('LLMServer', 'max_tokens')
-                    # Nettoyer les commentaires inline si présents
-                    if '#' in value:
-                        value = value.split('#')[0].strip()
-                    llm_config['max_tokens'] = int(value)
-                except (ValueError, TypeError):
-                    pass  # Ignorer si la valeur n'est pas un entier valide
+            temp = safe_parse_config_value(config, 'LLMServer', 'temperature', float, None)
+            if temp is not None:
+                llm_config['temperature'] = temp
+                
+            max_tokens = safe_parse_config_value(config, 'LLMServer', 'max_tokens', int, None)
+            if max_tokens is not None:
+                llm_config['max_tokens'] = max_tokens
                     
             service_configs['llm_service'] = llm_config
     
