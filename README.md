@@ -11,6 +11,7 @@ Une application de bureau complète pour préparer, analyser et interagir avec v
 - **🖥️ Application de Bureau Native** : Interface utilisateur web moderne (`Flask` + `pywebview`) encapsulée dans une application de bureau autonome pour une expérience fluide et intégrée.
 - **🧠 Scan de Projet Intelligent** : Analyse les répertoires locaux en respectant automatiquement les règles `.gitignore` et en filtrant les fichiers non pertinents (binaires, logs, etc.).
 - **🔐 Masquage de Secrets Avancé** : Utilise `detect-secrets` et des expressions régulières pour identifier et masquer les informations sensibles avant la génération du contexte.
+- **🔄 Persistance de Sélection de Fichiers** : Sauvegarde automatiquement votre sélection de fichiers et permet de la restaurer en un clic lors de la prochaine ouverture du projet. Identifie et met en évidence les nouveaux fichiers ajoutés depuis la dernière session.
 - **💾 Gestion de Conversations** : Sauvegardez, chargez, dupliquez et gérez vos sessions de chat avec **génération automatique de titre par IA**. Le système inclut le contexte du projet et un **mécanisme de verrouillage** pour un travail multi-instances sécurisé.
 - **🧰 Toolbox Développeur Augmenté** : Un puissant assistant IA intégré avec deux modes :
     - **Mode API** : Un client de chat direct avec votre LLM configuré (supporte OpenAI et Ollama), avec gestion de l'historique, streaming, et export des conversations.
@@ -80,6 +81,9 @@ Une application de bureau complète pour préparer, analyser et interagir avec v
     - Choisissez votre projet et cliquez sur **"Scanner le répertoire"**.
 2.  **Sélectionner les Fichiers** :
     - L'arbre des fichiers de votre projet (filtrés) apparaît.
+    - Si vous avez déjà travaillé sur ce projet, une section **"Session Précédente Détectée"** apparaît :
+        - Cliquez sur le bouton **"Restaurer la sélection précédente"** pour réappliquer votre sélection de fichiers.
+        - Les **nouveaux fichiers** ajoutés depuis votre dernière session sont mis en évidence dans une section dédiée.
     - Cochez les fichiers et dossiers que vous souhaitez inclure dans le contexte.
 3.  **Générer le Contexte** :
     - Dans la section 3, ajoutez des instructions initiales au LLM si nécessaire.

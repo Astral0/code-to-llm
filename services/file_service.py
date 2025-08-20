@@ -72,8 +72,8 @@ class FileService(BaseService):
             # Filtrer les fichiers binaires
             filtered_files = self._filter_binary_files(scanned_files)
             
-            # Préparer la structure pour l'affichage
-            file_tree_data = [{"path": f["relative_path"], "size": f["size"]} for f in filtered_files]
+            # Préparer la structure pour l'affichage (inclure mtime)
+            file_tree_data = [{"path": f["relative_path"], "size": f["size"], "mtime": f.get("mtime", 0)} for f in filtered_files]
             
             # Calculer les fichiers les plus volumineux (top 10)
             largest_files = sorted(filtered_files, key=lambda f: f['size'], reverse=True)[:10]
@@ -284,37 +284,51 @@ class FileService(BaseService):
     
     def _scan_files_with_gitignore(self, directory_path: str, 
                                   gitignore_spec: pathspec.PathSpec) -> List[Dict[str, Any]]:
-        """Scanne récursivement les fichiers en appliquant les règles gitignore."""
+        """
+        Scanne récursivement les fichiers en appliquant les règles gitignore
+        avec une stratégie d'élagage pour une performance optimale.
+        """
         scanned_files = []
-        directory_path = Path(directory_path)
+        base_path = Path(directory_path)
         
-        try:
-            for file_path in directory_path.rglob('*'):
-                if file_path.is_file():
-                    try:
-                        # Calculer le chemin relatif
-                        relative_path = file_path.relative_to(directory_path).as_posix()
-                        
-                        # Vérifier si le fichier est ignoré
-                        if not gitignore_spec.match_file(relative_path):
-                            file_size = file_path.stat().st_size
-                            scanned_files.append({
-                                'absolute_path': str(file_path),
-                                'relative_path': relative_path,
-                                'name': file_path.name,
-                                'size': file_size
-                            })
-                            
-                            if self.config.get('debug') and len(scanned_files) % 1000 == 0:
-                                self.logger.debug(f"Scanné {len(scanned_files)} fichiers...")
-                                
-                    except Exception as file_error:
-                        self.logger.warning(f"Erreur lors du traitement de {file_path}: {file_error}")
-                        continue
-                        
-        except Exception as e:
-            self.logger.error(f"Erreur lors du scan récursif: {e}")
+        for root, dirs, files in os.walk(directory_path, topdown=True):
+            root_path = Path(root)
             
+            # OPTIMISATION CLÉ : Élagage des répertoires ignorés
+            # Approche pythonique : modification en place avec list comprehension
+            # Plus performant (une seule passe) et plus expressif
+            dirs[:] = [
+                d for d in dirs 
+                if not gitignore_spec.match_file(
+                    root_path.joinpath(d).relative_to(base_path).as_posix() + '/'
+                )
+            ]
+            
+            # Traiter les fichiers du répertoire courant
+            for filename in files:
+                file_abs_path = root_path.joinpath(filename)
+                file_rel_path = file_abs_path.relative_to(base_path).as_posix()
+                
+                if not gitignore_spec.match_file(file_rel_path):
+                    try:
+                        file_stat = file_abs_path.stat()
+                        file_size = file_stat.st_size
+                        file_mtime = file_stat.st_mtime  # Timestamp de modification
+                        scanned_files.append({
+                            'absolute_path': str(file_abs_path),
+                            'relative_path': file_rel_path,
+                            'name': filename,
+                            'size': file_size,
+                            'mtime': file_mtime
+                        })
+                        
+                        if self.config.get('debug') and len(scanned_files) % 1000 == 0:
+                            self.logger.debug(f"Scanné {len(scanned_files)} fichiers...")
+                            
+                    except OSError as e:
+                        self.logger.warning(f"Impossible d'accéder au fichier {file_abs_path}: {e}")
+                        continue
+        
         return scanned_files
     
     def _filter_binary_files(self, files: List[Dict[str, Any]]) -> List[Dict[str, Any]]:

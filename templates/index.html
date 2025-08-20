@@ -83,6 +83,79 @@
         <div id="fileList" class="file-tree border p-3 rounded bg-light" style="max-height: 400px; overflow-y: auto;">
           <p class="text-muted text-center placeholder-message">The file tree will appear here after analysis.</p>
         </div>
+        
+        <!-- Section unifiée pour la gestion de session (affichée conditionnellement) -->
+        <div id="sessionManagementSection" class="mt-4 d-none">
+            <div class="card border-info shadow-sm">
+                <div class="card-header bg-info bg-opacity-10 d-flex justify-content-between align-items-center" 
+                     role="button" 
+                     data-bs-toggle="collapse" 
+                     data-bs-target="#sessionCollapse">
+                    <h6 class="mb-0">
+                        <i class="fas fa-history text-info"></i>
+                        Session Précédente Détectée
+                        <span class="badge bg-info ms-2">
+                            <span id="savedFileCount">0</span> fichiers sauvegardés
+                        </span>
+                    </h6>
+                    <i class="fas fa-chevron-down"></i>
+                </div>
+                <div id="sessionCollapse" class="collapse">
+                    <div class="card-body">
+                        <!-- Bouton de restauration principal -->
+                        <div class="d-grid gap-2 mb-3">
+                            <button id="restoreSelectionBtn" class="btn btn-info btn-lg">
+                                <i class="fas fa-magic"></i> 
+                                Restaurer la sélection précédente
+                                <small class="d-block mt-1 opacity-75">
+                                    Réappliquer les <span class="savedFileCountDup">0</span> fichiers de la dernière session
+                                </small>
+                            </button>
+                        </div>
+                        
+                        <!-- Séparateur visuel -->
+                        <div class="separator-with-text my-4">
+                            <hr class="bg-secondary opacity-25">
+                            <span class="bg-white px-3 text-muted small">Et/Ou</span>
+                        </div>
+
+                        <!-- Zone pour les nouveaux fichiers (affichée conditionnellement) -->
+                        <div id="newFilesContainer" class="d-none">
+                            <div class="alert alert-warning d-flex align-items-center mb-3" role="alert">
+                                <i class="fas fa-exclamation-triangle me-2"></i>
+                                <div>
+                                    <strong>Nouveaux fichiers détectés</strong>
+                                    <span class="badge bg-warning text-dark ms-2" id="newFilesCount">0</span>
+                                    <div class="small opacity-75">Ces fichiers n'étaient pas dans votre sélection précédente</div>
+                                </div>
+                            </div>
+                            
+                            <div class="form-check mb-3">
+                                <input class="form-check-input" type="checkbox" id="selectAllNewFiles">
+                                <label class="form-check-label fw-bold" for="selectAllNewFiles">
+                                    Sélectionner tous les nouveaux fichiers
+                                </label>
+                            </div>
+                            
+                            <div id="newFilesList" class="list-group list-group-flush max-height-300 overflow-auto">
+                                <!-- Fichiers injectés dynamiquement -->
+                            </div>
+                        </div>
+
+                        <!-- Message si aucun nouveau fichier -->
+                        <div id="noNewFilesMessage" class="d-none">
+                            <div class="alert alert-success d-flex align-items-center" role="alert">
+                                <i class="fas fa-check-circle me-2"></i>
+                                <div>
+                                    <strong>Projet à jour</strong>
+                                    <div class="small opacity-75">Aucun nouveau fichier depuis votre dernière session</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
       </div>
     </section>
     

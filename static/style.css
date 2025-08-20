@@ -273,3 +273,50 @@ body {
 .desktop-only {
     display: none;
 }
+
+/* Styles pour la section de gestion de session */
+.separator-with-text {
+    position: relative;
+    text-align: center;
+}
+
+.separator-with-text hr {
+    position: absolute;
+    width: 100%;
+    top: 50%;
+    margin: 0;
+}
+
+.separator-with-text span {
+    position: relative;
+    background: white;
+    padding: 0 1rem;
+}
+
+.max-height-300 {
+    max-height: 300px;
+}
+
+/* Animation pour le bouton de restauration */
+#restoreSelectionBtn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0, 123, 255, 0.3);
+    transition: all 0.3s ease;
+}
+
+/* Style pour les nouveaux fichiers */
+#newFilesList .list-group-item {
+    transition: background-color 0.5s ease;
+}
+
+#newFilesList .list-group-item:hover {
+    background-color: #f8f9fa;
+}
+
+/* Toast notifications */
+.toast-container {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    z-index: 1050;
+}
