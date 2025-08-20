@@ -334,12 +334,88 @@ document.addEventListener('DOMContentLoaded', () => {
                 
                 if (result.success) {
                     console.log("Scan terminé:", result);
+                    console.log("Sélection sauvegardée reçue:", result.saved_selection);
+                    console.log("Nombre de fichiers sauvegardés:", result.saved_selection_count);
+                    
+                    // Stocker les données
+                    savedSelection = result.saved_selection || [];
+                    currentFiles = result.files.map(f => f.path);
                     
                     // Préparer les données pour l'affichage
                     includedFilePaths = result.files.map(f => f.path);
                     currentFilesData = result.files; // Stocker pour utilisation ultérieure
                     
                     renderFileList(result.files);
+                    
+                    // Gérer l'affichage de la section de gestion de session
+                    // Attendre un peu que le DOM soit complètement chargé
+                    setTimeout(() => {
+                        const sessionSection = document.getElementById('sessionManagementSection');
+                        console.log("Section de session trouvée:", !!sessionSection);
+                        console.log("Longueur savedSelection:", savedSelection.length);
+                        
+                        if (!sessionSection) {
+                            console.error("sessionManagementSection n'existe pas dans le DOM!");
+                            console.log("Éléments avec 'session' dans l'ID:", 
+                                Array.from(document.querySelectorAll('[id*="session"]')).map(el => el.id));
+                        }
+                        
+                        if (sessionSection && savedSelection.length > 0) {
+                            // Afficher la section de gestion de session
+                            sessionSection.classList.remove('d-none');
+                            
+                            // Mettre à jour les compteurs
+                            const savedFileCountElement = document.getElementById('savedFileCount');
+                            if (savedFileCountElement) {
+                                savedFileCountElement.textContent = savedSelection.length;
+                            }
+                            const savedFileCountDupElement = document.querySelector('.savedFileCountDup');
+                            if (savedFileCountDupElement) {
+                                savedFileCountDupElement.textContent = savedSelection.length;
+                            }
+                            
+                            // Attacher l'event listener au bouton de restauration
+                            const restoreBtn = document.getElementById('restoreSelectionBtn');
+                            if (restoreBtn) {
+                                console.log("Attachement de l'event listener au bouton de restauration");
+                                restoreBtn.onclick = async function() {
+                                    console.log("Clic sur le bouton de restauration détecté!");
+                                    await handleRestoreSelection();
+                                };
+                            }
+                            
+                            // Identifier et afficher les nouveaux fichiers
+                            const newFiles = currentFiles.filter(file => !savedSelection.includes(file));
+                            
+                            if (newFiles.length > 0) {
+                                // Afficher les nouveaux fichiers
+                                const newFilesContainer = document.getElementById('newFilesContainer');
+                                const noNewFilesMessage = document.getElementById('noNewFilesMessage');
+                                
+                                if (newFilesContainer) {
+                                    newFilesContainer.classList.remove('d-none');
+                                }
+                                if (noNewFilesMessage) {
+                                    noNewFilesMessage.classList.add('d-none');
+                                }
+                                displayNewFiles(newFiles);
+                            } else {
+                                // Afficher le message "Projet à jour"
+                                const newFilesContainer = document.getElementById('newFilesContainer');
+                                const noNewFilesMessage = document.getElementById('noNewFilesMessage');
+                                
+                                if (newFilesContainer) {
+                                    newFilesContainer.classList.add('d-none');
+                                }
+                                if (noNewFilesMessage) {
+                                    noNewFilesMessage.classList.remove('d-none');
+                                }
+                            }
+                        } else if (sessionSection) {
+                            // Aucune session précédente
+                            sessionSection.classList.add('d-none');
+                        }
+                    }, 100); // Fermeture du setTimeout
                     hideError(analyzeError);
                     
                     // Sélectionner tous les fichiers par défaut sauf les fichiers de dev
@@ -402,6 +478,10 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
 
+    // Variables globales pour la gestion de session
+    let savedSelection = [];
+    let currentFiles = [];
+    
     // --- Render file tree ---
     function renderFileList(files) {
         fileListDiv.innerHTML = '';
@@ -423,6 +503,120 @@ document.addEventListener('DOMContentLoaded', () => {
         noteDiv.className = 'alert alert-info mt-3';
         noteDiv.innerHTML = '<small><i class="fas fa-info-circle"></i> Note: Only files not ignored by .gitignore rules are displayed and selected.</small>';
         fileListDiv.appendChild(noteDiv);
+    }
+    
+    // Fonction d'affichage des nouveaux fichiers
+    function displayNewFiles(newFiles) {
+        const container = document.getElementById('newFilesContainer');
+        const list = document.getElementById('newFilesList');
+        const count = document.getElementById('newFilesCount');
+        
+        if (!container || !list) return;
+        
+        // Mettre à jour le compteur
+        count.textContent = newFiles.length;
+        
+        // Réinitialiser la liste
+        list.innerHTML = '';
+        
+        // Créer les éléments de liste avec une meilleure UX
+        newFiles.forEach((filePath, index) => {
+            const item = document.createElement('div');
+            item.className = 'list-group-item d-flex align-items-center py-2';
+            
+            // Créer une structure plus riche
+            const itemContent = document.createElement('div');
+            itemContent.className = 'd-flex align-items-center flex-grow-1';
+            
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.className = 'form-check-input me-3';
+            checkbox.id = `new-file-${index}`;
+            checkbox.dataset.filePath = filePath;
+            
+            // Synchronisation bidirectionnelle
+            checkbox.addEventListener('change', function() {
+                syncFileSelection(filePath, this.checked);
+                updateNewFilesSelectAll(); // Mettre à jour l'état du "select all"
+            });
+            
+            const label = document.createElement('label');
+            label.htmlFor = checkbox.id;
+            label.className = 'form-check-label d-flex align-items-center flex-grow-1';
+            label.style.cursor = 'pointer';
+            
+            // Icône selon le type de fichier
+            const fileIcon = getFileIcon(filePath);
+            
+            label.innerHTML = `
+                <i class="${fileIcon} text-muted me-2"></i>
+                <span class="text-truncate" title="${filePath}">${filePath}</span>
+            `;
+            
+            itemContent.appendChild(checkbox);
+            itemContent.appendChild(label);
+            item.appendChild(itemContent);
+            list.appendChild(item);
+        });
+        
+        // Animation d'apparition
+        list.style.opacity = '0';
+        setTimeout(() => {
+            list.style.transition = 'opacity 0.3s';
+            list.style.opacity = '1';
+        }, 100);
+    }
+    
+    // Fonction helper pour obtenir l'icône selon l'extension
+    function getFileIcon(filePath) {
+        const ext = filePath.split('.').pop().toLowerCase();
+        const iconMap = {
+            'js': 'fab fa-js-square',
+            'py': 'fab fa-python',
+            'html': 'fab fa-html5',
+            'css': 'fab fa-css3-alt',
+            'json': 'fas fa-code',
+            'md': 'fab fa-markdown',
+            'txt': 'far fa-file-alt',
+            'pdf': 'far fa-file-pdf',
+            'jpg': 'far fa-file-image',
+            'png': 'far fa-file-image',
+            'gif': 'far fa-file-image'
+        };
+        return iconMap[ext] || 'far fa-file-code';
+    }
+    
+    // Fonction pour mettre à jour l'état du checkbox "select all"
+    function updateNewFilesSelectAll() {
+        const selectAll = document.getElementById('selectAllNewFiles');
+        const checkboxes = document.querySelectorAll('#newFilesList input[type="checkbox"]');
+        const checkedBoxes = document.querySelectorAll('#newFilesList input[type="checkbox"]:checked');
+        
+        if (selectAll) {
+            selectAll.checked = checkboxes.length > 0 && checkboxes.length === checkedBoxes.length;
+            selectAll.indeterminate = checkedBoxes.length > 0 && checkedBoxes.length < checkboxes.length;
+        }
+    }
+    
+    // Fonction de synchronisation des sélections
+    function syncFileSelection(filePath, isChecked) {
+        // Synchroniser dans l'arbre principal
+        const mainCheckbox = document.querySelector(`#fileList input[value="${filePath}"]`);
+        if (mainCheckbox && mainCheckbox.checked !== isChecked) {
+            mainCheckbox.checked = isChecked;
+            updateParentCheckboxes(mainCheckbox);
+        }
+        
+        // Synchroniser dans la liste des nouveaux fichiers
+        const newFileCheckbox = document.querySelector(`#newFilesList input[data-file-path="${filePath}"]`);
+        if (newFileCheckbox && newFileCheckbox.checked !== isChecked) {
+            newFileCheckbox.checked = isChecked;
+        }
+        
+        // Mettre à jour le compteur si la fonction existe
+        if (typeof updateFileCount === 'function') {
+            updateFileCount();
+        }
     }
 
     // Construct a tree structure from relative paths
@@ -1514,6 +1708,129 @@ document.addEventListener('DOMContentLoaded', () => {
             // Pour une meilleure UX, on pourrait le réactiver après un délai.
         }
     });
+    
+    // Fonction de restauration de la sélection
+    async function handleRestoreSelection() {
+        console.log("Début de la restauration de la sélection");
+        console.log("savedSelection contient:", savedSelection);
+        
+        const btn = document.getElementById('restoreSelectionBtn');
+        if (!btn) {
+            console.error("Bouton de restauration non trouvé");
+            return;
+        }
+        const originalContent = btn.innerHTML;
+        
+        // Animation de chargement
+        btn.disabled = true;
+        btn.innerHTML = `
+            <span class="spinner-border spinner-border-sm me-2" role="status"></span>
+            Restauration en cours...
+        `;
+        
+        // Désélectionner tout d'abord avec une petite pause pour l'effet visuel
+        document.querySelectorAll('#fileList input[type="checkbox"]').forEach(cb => {
+            cb.checked = false;
+        });
+        
+        // Attendre un peu pour l'effet visuel
+        await new Promise(resolve => setTimeout(resolve, 300));
+        
+        // Appliquer la sélection sauvegardée avec animation
+        let restoredCount = 0;
+        let failedCount = 0;
+        const restorationPromises = [];
+        
+        savedSelection.forEach((filePath, index) => {
+            restorationPromises.push(new Promise(resolve => {
+                setTimeout(() => {
+                    const checkbox = document.querySelector(`#fileList input[value="${filePath}"]`);
+                    if (checkbox) {
+                        checkbox.checked = true;
+                        restoredCount++;
+                        
+                        // Animation visuelle sur la checkbox
+                        checkbox.parentElement.style.backgroundColor = '#d1ecf1';
+                        setTimeout(() => {
+                            checkbox.parentElement.style.transition = 'background-color 0.5s';
+                            checkbox.parentElement.style.backgroundColor = '';
+                        }, 500);
+                    } else {
+                        console.log("Checkbox non trouvée pour:", filePath);
+                        failedCount++;
+                    }
+                    resolve();
+                }, index * 10); // Délai progressif pour effet cascade
+            }));
+        });
+        
+        // Attendre que toutes les restaurations soient terminées
+        await Promise.all(restorationPromises);
+        
+        // Mettre à jour les compteurs et l'état des boutons parents
+        document.querySelectorAll('#fileList input[type="checkbox"]:checked').forEach(cb => {
+            updateParentCheckboxes(cb);
+        });
+        
+        // Restaurer le bouton
+        btn.disabled = false;
+        btn.innerHTML = originalContent;
+        
+        // Feedback visuel avec détails
+        let message = `✓ ${restoredCount} fichiers restaurés`;
+        if (failedCount > 0) {
+            message += ` (${failedCount} fichiers introuvables)`;
+            showNotification(message, 'warning');
+        } else {
+            showNotification(message, 'success');
+        }
+        
+        // Optionnel : faire défiler jusqu'au premier fichier sélectionné
+        const firstSelected = document.querySelector('#fileList input[type="checkbox"]:checked');
+        if (firstSelected) {
+            firstSelected.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+    }
+    
+    // Gestionnaire "Sélectionner tous les nouveaux fichiers"
+    document.getElementById('selectAllNewFiles')?.addEventListener('change', function() {
+        const isChecked = this.checked;
+        
+        document.querySelectorAll('#newFilesList input[type="checkbox"]').forEach(cb => {
+            cb.checked = isChecked;
+            syncFileSelection(cb.dataset.filePath, isChecked);
+        });
+    });
+    
+    // Fonction pour afficher les notifications
+    function showNotification(message, type = 'info') {
+        // Créer un conteneur si nécessaire
+        let toastContainer = document.querySelector('.toast-container');
+        if (!toastContainer) {
+            toastContainer = document.createElement('div');
+            toastContainer.className = 'toast-container';
+            document.body.appendChild(toastContainer);
+        }
+        
+        const toast = document.createElement('div');
+        toast.className = `toast align-items-center text-white bg-${type} border-0`;
+        toast.setAttribute('role', 'alert');
+        toast.innerHTML = `
+            <div class="d-flex">
+                <div class="toast-body">${message}</div>
+                <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+            </div>
+        `;
+        
+        toastContainer.appendChild(toast);
+        const bsToast = new bootstrap.Toast(toast);
+        bsToast.show();
+        
+        // Nettoyer après disparition
+        toast.addEventListener('hidden.bs.toast', () => {
+            toast.remove();
+        });
+    }
 
 }); // Fin de DOMContentLoaded
 

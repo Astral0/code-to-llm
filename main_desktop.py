@@ -35,6 +35,9 @@ os.makedirs(DATA_DIR, exist_ok=True)
 # Définir le chemin du fichier de paramètres
 SETTINGS_PATH = os.path.join(DATA_DIR, 'settings.json')
 
+# Définir le chemin du cache de sélection
+SELECTION_CACHE_PATH = os.path.join(DATA_DIR, 'selection_cache.json')
+
 # Lire la configuration
 def load_config():
     """Charge la configuration depuis config.ini"""
@@ -317,6 +320,33 @@ class Api:
             logging.error(error_msg)
             return {'success': False, 'error': error_msg}
     
+    def _save_selection_for_project(self, directory_path, selected_files):
+        """
+        Sauvegarde la liste des fichiers sélectionnés pour un projet.
+        
+        Args:
+            directory_path (str): Chemin absolu du répertoire du projet
+            selected_files (list): Liste des chemins relatifs des fichiers sélectionnés
+        """
+        try:
+            # Charger le cache existant
+            cache = {}
+            if os.path.exists(SELECTION_CACHE_PATH):
+                with open(SELECTION_CACHE_PATH, 'r', encoding='utf-8') as f:
+                    cache = json.load(f)
+            
+            # Mettre à jour avec la nouvelle sélection
+            cache[directory_path] = selected_files
+            
+            # Sauvegarder
+            with open(SELECTION_CACHE_PATH, 'w', encoding='utf-8') as f:
+                json.dump(cache, f, indent=2, ensure_ascii=False)
+            
+            self.logger.info(f"✓ Sélection sauvegardée : {len(selected_files)} fichiers pour {directory_path}")
+            
+        except Exception as e:
+            self.logger.error(f"✗ Erreur sauvegarde sélection : {e}")
+    
     def launch_pywebview_browser(self):
         """Lance une nouvelle fenêtre pywebview pour le navigateur"""
         try:
@@ -477,7 +507,24 @@ class Api:
         if result.get('success'):
             self.current_directory = result.get('directory')
             self.file_cache = result.get('file_cache', [])
-            return result.get('response_for_frontend')
+            
+            # Charger la sélection sauvegardée si elle existe
+            saved_selection = []
+            if os.path.exists(SELECTION_CACHE_PATH):
+                try:
+                    with open(SELECTION_CACHE_PATH, 'r', encoding='utf-8') as f:
+                        cache = json.load(f)
+                        saved_selection = cache.get(directory_path, [])
+                        self.logger.info(f"✓ Sélection précédente trouvée : {len(saved_selection)} fichiers")
+                except Exception as e:
+                    self.logger.error(f"✗ Erreur lecture cache : {e}")
+            
+            # Ajouter à la réponse
+            response = result.get('response_for_frontend')
+            response['saved_selection'] = saved_selection
+            response['saved_selection_count'] = len(saved_selection)
+            
+            return response
         else:
             return {'success': False, 'error': result.get('error', 'Erreur inconnue')}
     
@@ -508,6 +555,9 @@ class Api:
         if context_result.get('success'):
             # Stocker le contexte pour la Toolbox
             self._last_generated_context = context_result['context']
+            
+            # Sauvegarder la sélection pour ce projet
+            self._save_selection_for_project(self.current_directory, selected_files)
             
             # Calculer les statistiques complètes pour le frontend
             file_contents = file_result['file_contents']
