@@ -72,8 +72,8 @@ class FileService(BaseService):
             # Filtrer les fichiers binaires
             filtered_files = self._filter_binary_files(scanned_files)
             
-            # Préparer la structure pour l'affichage
-            file_tree_data = [{"path": f["relative_path"], "size": f["size"]} for f in filtered_files]
+            # Préparer la structure pour l'affichage (inclure mtime)
+            file_tree_data = [{"path": f["relative_path"], "size": f["size"], "mtime": f.get("mtime", 0)} for f in filtered_files]
             
             # Calculer les fichiers les plus volumineux (top 10)
             largest_files = sorted(filtered_files, key=lambda f: f['size'], reverse=True)[:10]
@@ -311,12 +311,15 @@ class FileService(BaseService):
                 
                 if not gitignore_spec.match_file(file_rel_path):
                     try:
-                        file_size = file_abs_path.stat().st_size
+                        file_stat = file_abs_path.stat()
+                        file_size = file_stat.st_size
+                        file_mtime = file_stat.st_mtime  # Timestamp de modification
                         scanned_files.append({
                             'absolute_path': str(file_abs_path),
                             'relative_path': file_rel_path,
                             'name': filename,
-                            'size': file_size
+                            'size': file_size,
+                            'mtime': file_mtime
                         })
                         
                         if self.config.get('debug') and len(scanned_files) % 1000 == 0:

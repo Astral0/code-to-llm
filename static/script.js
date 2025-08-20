@@ -384,10 +384,15 @@ document.addEventListener('DOMContentLoaded', () => {
                                 };
                             }
                             
-                            // Identifier et afficher les nouveaux fichiers
-                            const newFiles = currentFiles.filter(file => !savedSelection.includes(file));
+                            // Identifier et afficher les nouveaux fichiers avec leurs métadonnées
+                            const newFilesWithData = currentFilesData.filter(file => 
+                                !savedSelection.includes(file.path)
+                            );
                             
-                            if (newFiles.length > 0) {
+                            // Trier par date de modification (plus récent en premier)
+                            newFilesWithData.sort((a, b) => (b.mtime || 0) - (a.mtime || 0));
+                            
+                            if (newFilesWithData.length > 0) {
                                 // Afficher les nouveaux fichiers
                                 const newFilesContainer = document.getElementById('newFilesContainer');
                                 const noNewFilesMessage = document.getElementById('noNewFilesMessage');
@@ -398,7 +403,7 @@ document.addEventListener('DOMContentLoaded', () => {
                                 if (noNewFilesMessage) {
                                     noNewFilesMessage.classList.add('d-none');
                                 }
-                                displayNewFiles(newFiles);
+                                displayNewFiles(newFilesWithData);
                             } else {
                                 // Afficher le message "Projet à jour"
                                 const newFilesContainer = document.getElementById('newFilesContainer');
@@ -505,6 +510,24 @@ document.addEventListener('DOMContentLoaded', () => {
         fileListDiv.appendChild(noteDiv);
     }
     
+    // Fonction helper pour formater la date relative
+    function getRelativeTime(timestamp) {
+        if (!timestamp) return '';
+        
+        const now = Date.now() / 1000; // Convertir en secondes
+        const diff = now - timestamp;
+        
+        if (diff < 60) return 'à l\'instant';
+        if (diff < 3600) return `il y a ${Math.floor(diff / 60)} min`;
+        if (diff < 86400) return `il y a ${Math.floor(diff / 3600)} h`;
+        if (diff < 172800) return 'hier';
+        if (diff < 604800) return `il y a ${Math.floor(diff / 86400)} jours`;
+        if (diff < 2592000) return `il y a ${Math.floor(diff / 604800)} sem`;
+        
+        const date = new Date(timestamp * 1000);
+        return date.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' });
+    }
+    
     // Fonction d'affichage des nouveaux fichiers
     function displayNewFiles(newFiles) {
         const container = document.getElementById('newFilesContainer');
@@ -520,7 +543,8 @@ document.addEventListener('DOMContentLoaded', () => {
         list.innerHTML = '';
         
         // Créer les éléments de liste avec une meilleure UX
-        newFiles.forEach((filePath, index) => {
+        newFiles.forEach((fileData, index) => {
+            const filePath = fileData.path || fileData; // Support ancien format et nouveau
             const item = document.createElement('div');
             item.className = 'list-group-item d-flex align-items-center py-2';
             
@@ -548,9 +572,21 @@ document.addEventListener('DOMContentLoaded', () => {
             // Icône selon le type de fichier
             const fileIcon = getFileIcon(filePath);
             
+            // Formater la date
+            const relativeTime = getRelativeTime(fileData.mtime);
+            const isVeryRecent = fileData.mtime && ((Date.now() / 1000) - fileData.mtime) < 86400; // < 24h
+            
             label.innerHTML = `
                 <i class="${fileIcon} text-muted me-2"></i>
-                <span class="text-truncate" title="${filePath}">${filePath}</span>
+                <div class="d-flex flex-column flex-grow-1">
+                    <span class="text-truncate" title="${filePath}">${filePath}</span>
+                    ${relativeTime ? `
+                        <small class="text-muted">
+                            ${isVeryRecent ? '<span class="badge bg-success me-1">NEW</span>' : ''}
+                            ${relativeTime}
+                        </small>
+                    ` : ''}
+                </div>
             `;
             
             itemContent.appendChild(checkbox);
