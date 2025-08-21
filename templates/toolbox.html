@@ -472,6 +472,39 @@
             </div>
         </div>
     </div>
+    
+    <!-- Modal pour conversation verrouillée -->
+    <div class="modal fade" id="lockedConversationModal" tabindex="-1" aria-labelledby="lockedConversationModalLabel" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header bg-warning text-dark">
+                    <h5 class="modal-title" id="lockedConversationModalLabel">
+                        <i class="fas fa-lock"></i> Conversation Verrouillée
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="alert alert-warning" role="alert">
+                        <i class="fas fa-exclamation-triangle"></i>
+                        Cette conversation est actuellement verrouillée par <strong id="lockOwnerInfo"></strong>.
+                    </div>
+                    <p>Vous ne pouvez pas modifier cette conversation tant qu'elle est verrouillée.</p>
+                    <p><strong>Options disponibles :</strong></p>
+                    <ul>
+                        <li><i class="fas fa-clock"></i> Attendre que l'utilisateur libère le verrou</li>
+                        <li><i class="fas fa-unlock-alt"></i> Forcer le déverrouillage (cliquez sur l'icône cadenas)</li>
+                        <li><i class="fas fa-copy"></i> Dupliquer la conversation pour créer votre propre copie</li>
+                    </ul>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Fermer</button>
+                    <button type="button" class="btn btn-info" id="duplicateFromLockModal">
+                        <i class="fas fa-copy"></i> Dupliquer
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script>
     <script src="{{ url_for('static', filename='chat_utils.js') }}"></script>
