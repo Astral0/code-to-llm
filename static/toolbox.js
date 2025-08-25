@@ -602,20 +602,50 @@ class ToolboxController {
         buttonsContainer.className = 'buttons-bottom';
         buttonsContainer.style.cssText = 'display: flex; gap: 5px;';
         
-        // Pour les messages utilisateur, ajouter un bouton d'édition
-        if (role === 'user' && this.provider.getCapabilities().edit) {
-            const editBtn = document.createElement('button');
-            editBtn.className = 'btn btn-sm btn-outline-secondary edit-btn';
-            editBtn.innerHTML = '<i class="fas fa-edit"></i>';
-            editBtn.title = 'Éditer ce message';
-            editBtn.style.cssText = 'opacity: 0.7; padding: 2px 6px; font-size: 12px;';
+        // Bouton Fork pour tous les messages (user et assistant)
+        const forkBtn = document.createElement('button');
+        forkBtn.className = 'btn btn-sm btn-outline-secondary fork-btn';
+        forkBtn.innerHTML = '<i class="fas fa-code-branch"></i>';
+        forkBtn.title = 'Créer une branche à partir d\'ici';
+        forkBtn.style.cssText = 'opacity: 0.7; padding: 2px 6px; font-size: 12px;';
+        
+        // Méthode plus simple : compter directement les message-bubble user/assistant
+        forkBtn.addEventListener('click', () => {
+            // Trouver tous les messages user et assistant dans l'affichage
+            const allUserAssistantMessages = Array.from(
+                document.querySelectorAll('.message-bubble.user, .message-bubble.assistant')
+            );
             
-            editBtn.addEventListener('click', () => {
-                this.editUserMessage(messageDiv, contentDiv);
-            });
+            // Trouver la position de ce message dans la liste
+            const messageIndexInDisplay = allUserAssistantMessages.indexOf(messageDiv);
             
-            buttonsContainer.appendChild(editBtn);
-        }
+            console.log('Recherche d\'index:');
+            console.log('- Messages user/assistant trouvés:', allUserAssistantMessages.length);
+            console.log('- Index de ce message dans l\'affichage:', messageIndexInDisplay);
+            
+            // Maintenant, trouver l'index correspondant dans chatHistory
+            let realIndex = -1;
+            let displayIndex = 0;
+            
+            for (let i = 0; i < this.chatHistory.length; i++) {
+                if (this.chatHistory[i].role === 'user' || this.chatHistory[i].role === 'assistant') {
+                    if (displayIndex === messageIndexInDisplay) {
+                        realIndex = i;
+                        break;
+                    }
+                    displayIndex++;
+                }
+            }
+            
+            console.log('- Index réel dans chatHistory:', realIndex);
+            if (realIndex >= 0) {
+                console.log('- Message trouvé:', this.chatHistory[realIndex]);
+            }
+            
+            this.forkConversationFrom(realIndex, contentDiv.dataset.rawContent, role);
+        });
+        
+        buttonsContainer.appendChild(forkBtn);
         
         // Bouton toggle markdown
         const toggleBtn = document.createElement('button');
@@ -678,6 +708,45 @@ class ToolboxController {
         });
         
         buttonsContainer.appendChild(copyBtn);
+        
+        // Bouton Éditer pour les messages utilisateur seulement
+        if (role === 'user') {
+            const editBtn = document.createElement('button');
+            editBtn.className = 'btn btn-sm btn-outline-secondary edit-btn';
+            editBtn.innerHTML = '<i class="fas fa-edit"></i>';
+            editBtn.title = 'Éditer et régénérer';
+            editBtn.style.cssText = 'opacity: 0.7; padding: 2px 6px; font-size: 12px;';
+            
+            editBtn.addEventListener('click', () => {
+                // Trouver l'index de ce message dans chatHistory
+                const allUserAssistantMessages = Array.from(
+                    document.querySelectorAll('.message-bubble.user, .message-bubble.assistant')
+                );
+                
+                const messageIndexInDisplay = allUserAssistantMessages.indexOf(messageDiv);
+                
+                // Trouver l'index réel dans chatHistory
+                let realIndex = -1;
+                let displayIndex = 0;
+                
+                for (let i = 0; i < this.chatHistory.length; i++) {
+                    if (this.chatHistory[i].role === 'user' || this.chatHistory[i].role === 'assistant') {
+                        if (displayIndex === messageIndexInDisplay) {
+                            realIndex = i;
+                            break;
+                        }
+                        displayIndex++;
+                    }
+                }
+                
+                if (realIndex >= 0) {
+                    this.editUserMessage(realIndex, contentDiv.dataset.rawContent);
+                }
+            });
+            
+            buttonsContainer.appendChild(editBtn);
+        }
+        
         messageDiv.appendChild(buttonsContainer);
     }
     
@@ -722,7 +791,330 @@ class ToolboxController {
     
     editUserMessage(messageDiv, contentDiv) {
         // Implémentation de l'édition de message (mode API seulement)
-        // ... (logique d'édition existante)
+        if (this.mode !== 'api') return;
+        
+        // Récupérer le contenu actuel
+        const currentContent = contentDiv.dataset.rawContent || contentDiv.textContent;
+        
+        // Créer une zone de texte pour l'édition
+        const textarea = document.createElement('textarea');
+        textarea.className = 'form-control';
+        textarea.value = currentContent;
+        textarea.style.width = '100%';
+        textarea.style.minHeight = '100px';
+        textarea.style.resize = 'vertical';
+        
+        // Créer les boutons de contrôle
+        const buttonsDiv = document.createElement('div');
+        buttonsDiv.className = 'mt-2';
+        buttonsDiv.style.display = 'flex';
+        buttonsDiv.style.gap = '10px';
+        
+        const saveBtn = document.createElement('button');
+        saveBtn.className = 'btn btn-sm btn-success';
+        saveBtn.innerHTML = '<i class="fas fa-check"></i> Valider';
+        
+        const cancelBtn = document.createElement('button');
+        cancelBtn.className = 'btn btn-sm btn-secondary';
+        cancelBtn.innerHTML = '<i class="fas fa-times"></i> Annuler';
+        
+        buttonsDiv.appendChild(saveBtn);
+        buttonsDiv.appendChild(cancelBtn);
+        
+        // Remplacer le contenu par la zone d'édition
+        const originalContent = contentDiv.innerHTML;
+        const originalDisplay = contentDiv.style.display;
+        contentDiv.style.display = 'none';
+        
+        // Créer un conteneur temporaire pour l'édition
+        const editContainer = document.createElement('div');
+        editContainer.className = 'edit-container';
+        editContainer.appendChild(textarea);
+        editContainer.appendChild(buttonsDiv);
+        
+        messageDiv.insertBefore(editContainer, contentDiv);
+        
+        // Focus sur le textarea
+        textarea.focus();
+        textarea.select();
+        
+        // Ajuster automatiquement la hauteur
+        const adjustHeight = () => {
+            textarea.style.height = 'auto';
+            textarea.style.height = textarea.scrollHeight + 'px';
+        };
+        adjustHeight();
+        textarea.addEventListener('input', adjustHeight);
+        
+        // Fonction pour sauvegarder les modifications
+        const saveEdit = () => {
+            const newContent = textarea.value.trim();
+            
+            if (!newContent) {
+                alert('Le message ne peut pas être vide');
+                return;
+            }
+            
+            // Trouver l'index du message dans l'historique
+            const messageIndex = Array.from(document.querySelectorAll('.message-bubble.user')).indexOf(messageDiv);
+            
+            if (messageIndex >= 0) {
+                // Mettre à jour l'historique du chat
+                let userMessageIndex = -1;
+                let currentIndex = 0;
+                
+                for (let i = 0; i < this.chatHistory.length; i++) {
+                    if (this.chatHistory[i].role === 'user') {
+                        if (currentIndex === messageIndex) {
+                            userMessageIndex = i;
+                            break;
+                        }
+                        currentIndex++;
+                    }
+                }
+                
+                if (userMessageIndex >= 0) {
+                    // Mettre à jour le message dans l'historique
+                    this.chatHistory[userMessageIndex].content = newContent;
+                    
+                    // Mettre à jour l'affichage
+                    contentDiv.dataset.rawContent = newContent;
+                    contentDiv.dataset.markdownContent = marked.parse(newContent);
+                    
+                    if (contentDiv.dataset.isMarkdown === 'true') {
+                        contentDiv.innerHTML = contentDiv.dataset.markdownContent;
+                    } else {
+                        contentDiv.textContent = newContent;
+                    }
+                    
+                    // Ajouter un indicateur visuel de modification
+                    const editedIndicator = messageDiv.querySelector('.edited-indicator');
+                    if (!editedIndicator) {
+                        const indicator = document.createElement('span');
+                        indicator.className = 'edited-indicator text-muted small';
+                        indicator.style.marginLeft = '10px';
+                        indicator.innerHTML = '<i class="fas fa-edit"></i> Modifié';
+                        
+                        const buttonsContainer = messageDiv.querySelector('.buttons-bottom');
+                        if (buttonsContainer) {
+                            buttonsContainer.appendChild(indicator);
+                        }
+                    }
+                    
+                    // Afficher un message système
+                    this.appendMessageToChat('system', 'Message utilisateur modifié. L\'historique de la conversation a été mis à jour.');
+                }
+            }
+            
+            // Restaurer l'affichage normal
+            editContainer.remove();
+            contentDiv.style.display = originalDisplay;
+        };
+        
+        // Fonction pour annuler l'édition
+        const cancelEdit = () => {
+            editContainer.remove();
+            contentDiv.style.display = originalDisplay;
+        };
+        
+        // Attacher les événements
+        saveBtn.addEventListener('click', saveEdit);
+        cancelBtn.addEventListener('click', cancelEdit);
+        
+        // Permettre Ctrl+Enter pour sauvegarder
+        textarea.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && e.ctrlKey) {
+                e.preventDefault();
+                saveEdit();
+            } else if (e.key === 'Escape') {
+                e.preventDefault();
+                cancelEdit();
+            }
+        });
+    }
+    
+    editUserMessage(messageIndex, originalContent) {
+        // Vérifier que Bootstrap est disponible
+        if (!window.bootstrap) {
+            console.error('Bootstrap non disponible');
+            return;
+        }
+        
+        const modalElement = document.getElementById('editMessageModal');
+        if (!modalElement) {
+            console.error('Modal editMessageModal non trouvé');
+            return;
+        }
+        
+        const modal = new bootstrap.Modal(modalElement);
+        const textarea = document.getElementById('editMessageTextarea');
+        const confirmBtn = document.getElementById('confirmEditBtn');
+        
+        // Pré-remplir avec le contenu actuel
+        textarea.value = originalContent;
+        
+        // Retirer l'ancien listener s'il existe
+        const newConfirmBtn = confirmBtn.cloneNode(true);
+        confirmBtn.parentNode.replaceChild(newConfirmBtn, confirmBtn);
+        
+        // Ajouter le nouveau listener
+        newConfirmBtn.addEventListener('click', () => {
+            const newContent = textarea.value.trim();
+            
+            if (newContent === '') {
+                alert('Le message ne peut pas être vide');
+                return;
+            }
+            
+            // Tronquer l'historique jusqu'à ce message (exclu)
+            this.chatHistory = this.chatHistory.slice(0, messageIndex);
+            
+            // Ajouter le nouveau message modifié
+            this.chatHistory.push({
+                role: 'user',
+                content: newContent
+            });
+            
+            // Rafraîchir l'affichage
+            this.refreshChatDisplay();
+            
+            // Fermer le modal
+            modal.hide();
+            
+            // Envoyer le message modifié au LLM pour obtenir une nouvelle réponse
+            if (this.isStreamEnabled) {
+                this.sendMessageStream(newContent);
+            } else {
+                this.sendMessage(newContent);
+            }
+            
+            // Message système pour indiquer l'édition
+            this.appendMessageToChat('system', 
+                '✏️ Message édité et historique tronqué. Nouvelle réponse en cours de génération...'
+            );
+        });
+        
+        // Afficher le modal
+        modal.show();
+    }
+    
+    async forkConversationFrom(messageIndex, originalContent, role) {
+        // Confirmation simple pour créer une nouvelle discussion
+        const confirmMessage = role === 'user' 
+            ? `Créer une nouvelle discussion à partir de ce message ?\n\nL'historique sera conservé jusqu'à AVANT ce message (il sera exclu et remplacé par votre nouveau message).`
+            : `Créer une nouvelle discussion à partir de cette réponse ?\n\nL'historique sera conservé jusqu'à cette réponse incluse.`;
+        
+        if (!confirm(confirmMessage)) {
+            return; // Annulation
+        }
+        
+        // CORRECTION: S'assurer que l'index est correct
+        // Si c'est -1, c'est qu'il y a un problème
+        if (messageIndex === -1) {
+            console.error('Erreur: impossible de trouver l\'index du message');
+            this.showError('Erreur lors de la création de la branche');
+            return;
+        }
+        
+        // Logique de découpage différenciée selon le rôle
+        let baseHistory;
+        if (role === 'user') {
+            // Fork sur message user: on prend l'historique AVANT ce message
+            // IMPORTANT: on exclut ce message car il sera remplacé
+            baseHistory = this.chatHistory.slice(0, messageIndex);
+        } else {
+            // Fork sur message assistant: on prend l'historique AVEC cette réponse
+            baseHistory = this.chatHistory.slice(0, messageIndex + 1);
+        }
+        
+        console.log(`Fork: ${baseHistory.length} messages conservés sur ${this.chatHistory.length}`);
+        console.log('Dernier message conservé:', baseHistory[baseHistory.length - 1]);
+        
+        // Préparer les données pour la branche
+        // Note: parentId peut être null si le parent n'est pas sauvegardé
+        // C'est volontaire pour éviter de créer des sauvegardes non désirées
+        const parentId = this.currentConversationId; // Peut être null, c'est OK
+        const parentTitle = this.conversationSummary || 'Conversation non sauvegardée';
+        const timestamp = new Date().toLocaleTimeString('fr-FR', {
+            hour: '2-digit',
+            minute: '2-digit'
+        });
+        const suggestedTitle = `${parentTitle} - Branche ${timestamp}`;
+        
+        // PAS de sauvegarde automatique du parent
+        // L'utilisateur décidera explicitement s'il veut sauvegarder
+        
+        // Initialiser la branche
+        this.initializeBranch({
+            parentId: parentId,
+            parentIndex: messageIndex,
+            parentRole: role,
+            parentTitle: parentTitle,
+            history: baseHistory,
+            suggestedTitle: suggestedTitle,
+            reason: 'exploration alternative'
+        });
+    }
+    
+    initializeBranch(branchData) {
+        // 1. CRUCIAL: Réinitialiser l'ID pour forcer la modal de sauvegarde
+        this.currentConversationId = null;
+        
+        // 2. Mettre à jour l'historique avec l'historique tronqué
+        this.chatHistory = [...branchData.history]; // Copie pour éviter les références
+        
+        // 3. Stocker les métadonnées de fork
+        this.forkInfo = {
+            sourceConversationId: branchData.parentId,
+            sourceMessageIndex: branchData.parentIndex,
+            sourceMessageRole: branchData.parentRole,
+            forkTimestamp: new Date().toISOString(),
+            forkReason: branchData.reason || 'exploration alternative'
+        };
+        
+        // 4. Stocker le titre suggéré
+        this.suggestedBranchTitle = branchData.suggestedTitle;
+        
+        // 5. Effacer complètement l'affichage et le reconstruire
+        const chatDisplayArea = document.getElementById('chatDisplayArea');
+        if (chatDisplayArea) {
+            chatDisplayArea.innerHTML = '';
+        }
+        
+        // 6. Afficher d'abord un message indiquant que le contexte est chargé (si présent)
+        if (this.mainContext) {
+            this.appendMessageToChat('system', 
+                `📚 Contexte du projet chargé (${this.estimateTokens(this.mainContext)} tokens estimés)`
+            );
+        }
+        
+        // 7. Afficher l'historique conservé
+        this.chatHistory.forEach(msg => {
+            this.appendMessageToChat(msg.role, msg.content);
+        });
+        
+        this.updateSaveButtonState();
+        
+        // 8. Message système avec séparateur visuel
+        this.appendMessageToChat('system', 
+            `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+            `🌿 NOUVELLE BRANCHE CRÉÉE\n` +
+            `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+            `L'historique ci-dessus a été conservé.\n` +
+            `Vous pouvez maintenant explorer une nouvelle direction.\n` +
+            `N'oubliez pas de sauvegarder cette nouvelle discussion.`
+        );
+        
+        // 9. Focus sur le champ de saisie pour que l'utilisateur puisse directement taper
+        const chatInput = document.getElementById('chatMessageInput');
+        if (chatInput) {
+            chatInput.focus();
+            chatInput.placeholder = 'Tapez votre message pour explorer une nouvelle direction...';
+            // Réinitialiser le placeholder après un délai
+            setTimeout(() => {
+                chatInput.placeholder = 'Tapez votre message ici...';
+            }, 5000);
+        }
     }
     
     async clearChat() {
@@ -814,31 +1206,99 @@ class ToolboxController {
                             </button>`;
             }
             
+            // Vérifier si c'est une branche - indicateur discret
+            const forkInfo = conv.metadata?.forkInfo;
+            let branchIcon = '';
+            
+            if (forkInfo) {
+                // Simple icône de branche avec tooltip informatif
+                const parentConv = this.conversations.find(
+                    c => c.id === forkInfo.sourceConversationId
+                );
+                const parentTitle = parentConv ? parentConv.title : 'conversation non sauvegardée';
+                
+                // Icône discrète avec tooltip
+                branchIcon = `<i class="fas fa-code-branch text-muted me-1" 
+                    style="font-size: 0.85em;" 
+                    title="Branche créée depuis: ${parentTitle}"></i> `;
+            }
+            
             // Formater la date
             const date = new Date(conv.updatedAt);
             const dateStr = date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
             
             convDiv.innerHTML = `
                 <div class="d-flex justify-content-between align-items-center">
-                    <div class="fw-bold">${conv.title || 'Sans titre'}</div>
+                    <div class="fw-bold">
+                        ${branchIcon}${conv.title || 'Sans titre'}
+                    </div>
                     ${lockIcon}
                 </div>
                 <div class="meta mb-2">${dateStr}</div>
                 <div class="conversation-actions">
-                    <button class="btn btn-sm btn-outline-primary" onclick="window.toolboxController.loadConversation('${conv.id}')" ${conv.isLocked && !conv.isLockedByMe ? 'disabled' : ''} title="Charger">
+                    <button class="btn btn-sm btn-outline-primary load-btn" 
+                        data-conv-id="${conv.id}"
+                        title="${conv.isLocked && !conv.isLockedByMe ? 'Verrouillée par ' + conv.lockInfo : 'Charger'}">
                         <i class="fas fa-folder-open"></i>
                     </button>
-                    <button class="btn btn-sm btn-outline-secondary" onclick="window.toolboxController.renameConversation('${conv.id}')" ${conv.isLocked && !conv.isLockedByMe ? 'disabled' : ''} title="Renommer">
+                    <button class="btn btn-sm btn-outline-secondary rename-btn" 
+                        data-conv-id="${conv.id}"
+                        title="${conv.isLocked && !conv.isLockedByMe ? 'Verrouillée par ' + conv.lockInfo : 'Renommer'}">
                         <i class="fas fa-edit"></i>
                     </button>
-                    <button class="btn btn-sm btn-outline-info" onclick="window.toolboxController.duplicateConversation('${conv.id}')" title="Dupliquer">
+                    <button class="btn btn-sm btn-outline-info duplicate-btn" 
+                        data-conv-id="${conv.id}"
+                        title="Dupliquer (toujours disponible)">
                         <i class="fas fa-copy"></i>
                     </button>
-                    <button class="btn btn-sm btn-outline-danger" onclick="window.toolboxController.deleteConversation('${conv.id}')" ${conv.isLocked && !conv.isLockedByMe ? 'disabled' : ''} title="Supprimer">
+                    <button class="btn btn-sm btn-outline-danger delete-btn" 
+                        data-conv-id="${conv.id}"
+                        title="${conv.isLocked && !conv.isLockedByMe ? 'Verrouillée par ' + conv.lockInfo : 'Supprimer'}">
                         <i class="fas fa-trash"></i>
                     </button>
                 </div>
             `;
+            
+            // Attacher les événements aux boutons
+            const loadBtn = convDiv.querySelector('.load-btn');
+            if (loadBtn) {
+                loadBtn.addEventListener('click', () => {
+                    if (conv.isLocked && !conv.isLockedByMe) {
+                        this.showLockedModal(conv);
+                        return;
+                    }
+                    this.loadConversation(conv.id);
+                });
+            }
+            
+            const renameBtn = convDiv.querySelector('.rename-btn');
+            if (renameBtn) {
+                renameBtn.addEventListener('click', () => {
+                    if (conv.isLocked && !conv.isLockedByMe) {
+                        this.showLockedModal(conv);
+                        return;
+                    }
+                    this.renameConversation(conv.id);
+                });
+            }
+            
+            const duplicateBtn = convDiv.querySelector('.duplicate-btn');
+            if (duplicateBtn) {
+                duplicateBtn.addEventListener('click', () => {
+                    this.duplicateConversation(conv.id);
+                });
+            }
+            
+            const deleteBtn = convDiv.querySelector('.delete-btn');
+            if (deleteBtn) {
+                deleteBtn.addEventListener('click', () => {
+                    if (conv.isLocked && !conv.isLockedByMe) {
+                        this.showLockedModal(conv);
+                        return;
+                    }
+                    this.deleteConversation(conv.id);
+                });
+            }
             
             conversationsList.appendChild(convDiv);
         });
@@ -847,7 +1307,7 @@ class ToolboxController {
     _buildConversationPayload(title, isAiGenerated = false) {
         const cleanTitle = title.replace(/[\r\n]+/g, ' ').trim().substring(0, 100);
 
-        return {
+        const payload = {
             id: this.currentConversationId,
             title: cleanTitle,
             history: this.chatHistory,
@@ -865,6 +1325,15 @@ class ToolboxController {
                 ai_generated_title: isAiGenerated
             }
         };
+        
+        // AJOUT: Inclure forkInfo si présent
+        if (this.forkInfo) {
+            payload.metadata.forkInfo = this.forkInfo;
+            // Nettoyer après utilisation
+            this.forkInfo = null;
+        }
+        
+        return payload;
     }
     
     async saveCurrentConversation() {
@@ -912,8 +1381,16 @@ class ToolboxController {
         let titleGeneratedByAI = false;
 
         // Réinitialiser la modale
-        titleInput.value = this.conversationSummary || '';
-        titleInput.placeholder = 'Nouvelle conversation';
+        // MODIFICATION: Pré-remplir avec le titre suggéré pour les branches
+        if (this.suggestedBranchTitle) {
+            titleInput.value = this.suggestedBranchTitle;
+            titleInput.placeholder = 'Nouvelle branche';
+            // Nettoyer après utilisation
+            this.suggestedBranchTitle = null;
+        } else {
+            titleInput.value = this.conversationSummary || '';
+            titleInput.placeholder = 'Nouvelle conversation';
+        }
         titleInput.disabled = false;
         suggestBtn.classList.remove('d-none');
         spinner.classList.add('d-none');
@@ -1058,13 +1535,56 @@ class ToolboxController {
                 // Mettre à jour l'affichage
                 this.refreshChatDisplay();
                 this.updateContextStatus(!!this.mainContext);
+                this.updateSaveButtonState();
                 this.displayConversations();
                 
-                this.appendMessageToChat('system', `Conversation "${conversation.title}" chargée`);
+                // Message système après le rafraîchissement
+                setTimeout(() => {
+                    this.appendMessageToChat('system', `Conversation "${conversation.title}" chargée`);
+                }, 100);
             }
         } catch (error) {
             this.showError(`Erreur lors du chargement: ${error}`);
         }
+    }
+    
+    showLockedModal(conv) {
+        // Vérifier que Bootstrap est disponible
+        if (!window.bootstrap) {
+            console.error('Bootstrap non disponible');
+            return;
+        }
+        
+        const modalElement = document.getElementById('lockedConversationModal');
+        if (!modalElement) {
+            console.error('Modal lockedConversationModal non trouvé');
+            return;
+        }
+        
+        const modal = new bootstrap.Modal(modalElement);
+        
+        // Mettre à jour les informations du verrou
+        const lockOwnerInfo = document.getElementById('lockOwnerInfo');
+        if (lockOwnerInfo && conv.lockInfo) {
+            lockOwnerInfo.textContent = conv.lockInfo;
+        }
+        
+        // Configurer le bouton Dupliquer
+        const duplicateBtn = document.getElementById('duplicateFromLockModal');
+        if (duplicateBtn) {
+            // Retirer l'ancien listener s'il existe
+            const newDuplicateBtn = duplicateBtn.cloneNode(true);
+            duplicateBtn.parentNode.replaceChild(newDuplicateBtn, duplicateBtn);
+            
+            // Ajouter le nouveau listener
+            newDuplicateBtn.addEventListener('click', () => {
+                modal.hide();
+                this.duplicateConversation(conv.id);
+            });
+        }
+        
+        // Afficher le modal
+        modal.show();
     }
     
     async duplicateConversation(conversationId) {
@@ -1272,12 +1792,17 @@ class ToolboxController {
         
         chatDisplayArea.innerHTML = '';
         
+        // Afficher tous les messages de l'historique
         this.chatHistory.forEach(msg => {
-            this.appendMessageToChat(msg.role, msg.content, false);
+            // Appel correct sans le 3ème paramètre (ou avec null)
+            this.appendMessageToChat(msg.role, msg.content);
         });
         
         // Mettre à jour le compteur de tokens
         this.updateTokenCount();
+        
+        // Scroller vers le bas pour voir les derniers messages
+        this.autoScrollToBottom();
     }
     
     estimateTokens(text) {

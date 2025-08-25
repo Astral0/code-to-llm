@@ -890,6 +890,7 @@ class Api:
     
     def get_conversations(self):
         """Récupère la liste des conversations avec leur statut de verrouillage"""
+        logging.info("=== BACKEND: get_conversations appelée ===")
         try:
             conversations = []
             
@@ -912,7 +913,8 @@ class Api:
                             'updatedAt': data.get('updatedAt', ''),
                             'isLocked': is_locked,
                             'isLockedByMe': is_locked_by_me,
-                            'lockInfo': f"{lock.get('user', 'inconnu')}@{lock.get('host', 'inconnu')}" if is_locked else None
+                            'lockInfo': f"{lock.get('user', 'inconnu')}@{lock.get('host', 'inconnu')}" if is_locked else None,
+                            'metadata': data.get('metadata', {})  # Inclure les métadonnées pour forkInfo
                         })
                     except Exception as e:
                         logging.error(f"Erreur lors de la lecture de {filename}: {str(e)}")
@@ -921,6 +923,7 @@ class Api:
             # Trier par date de mise à jour (plus récent en premier)
             conversations.sort(key=lambda x: x['updatedAt'], reverse=True)
             
+            logging.info(f"Nombre de conversations trouvées: {len(conversations)}")
             return conversations
             
         except Exception as e:
@@ -978,16 +981,22 @@ class Api:
     
     def get_conversation_details(self, conversation_id):
         """Récupère les détails complets d'une conversation"""
+        logging.info(f"=== BACKEND: get_conversation_details appelée avec ID: {conversation_id} ===")
         try:
             filepath = os.path.join(self.conversations_dir, f"{conversation_id}.json")
+            logging.info(f"Chemin du fichier: {filepath}")
+            
             if not os.path.exists(filepath):
+                logging.error(f"Fichier non trouvé: {filepath}")
                 raise FileNotFoundError(f"Conversation {conversation_id} non trouvée")
             
             with open(filepath, 'r', encoding='utf-8') as f:
-                return json.load(f)
+                data = json.load(f)
+                logging.info(f"Conversation chargée avec succès: {len(data.get('history', []))} messages")
+                return data
         
         except Exception as e:
-            logging.error(f"Erreur lors de la récupération de la conversation {conversation_id}: {str(e)}")
+            logging.error(f"ERREUR lors de la récupération de la conversation {conversation_id}: {str(e)}")
             return None
     
     def release_conversation_lock(self, conversation_id):

@@ -62,6 +62,12 @@ Cette structure représente le format de stockage d'une conversation dans le sys
 - `tags` : Liste de tags pour organiser les conversations
 - `isSummary` : Indique si c'est une synthèse d'une autre conversation
 - `sourceConversationId` : ID de la conversation source (si synthèse)
+- `forkInfo` : Informations de branche (optionnel)
+  - `sourceConversationId` : UUID de la conversation parent
+  - `sourceMessageIndex` : Index du message où la branche a été créée
+  - `sourceMessageRole` : Rôle du message source ("user" ou "assistant")
+  - `forkTimestamp` : Date de création de la branche
+  - `forkReason` : Raison de la création de la branche
 - `lock` : Informations de verrouillage
   - `active` : État du verrou (true/false)
   - `instanceId` : UUID de l'instance qui détient le verrou
