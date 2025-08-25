@@ -645,7 +645,10 @@ class ToolboxController {
         } else {
             // Pour les messages système, ne pas utiliser l'index car ils ne sont pas dans chatHistory
             if (role !== 'system' && role !== 'system-error') {
-                messageWrapper.dataset.messageIndex = this.chatHistory.length;
+                // Pour les messages non-streamés, le .push() dans sendMessage a déjà été fait.
+                // L'index du nouvel élément est donc simplement le dernier du tableau.
+                // C'est plus simple et plus performant (O(1)) que de rechercher.
+                messageWrapper.dataset.messageIndex = this.chatHistory.length - 1;
             }
         }
         
