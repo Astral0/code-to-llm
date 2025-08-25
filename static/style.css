@@ -320,3 +320,142 @@ body {
     right: 20px;
     z-index: 1050;
 }
+
+/* ============================================
+   Styles pour la navigabilité du chat - Phase 1
+   ============================================ */
+
+/* Structure des messages avec en-tête pliable */
+.message-wrapper {
+    margin-bottom: 15px;
+    transition: all 0.3s ease;
+}
+
+.message-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 12px;
+    cursor: pointer;
+    background-color: rgba(0, 0, 0, 0.02);
+    border-radius: 8px 8px 0 0;
+    user-select: none;
+    margin: -10px -15px 10px -15px; /* Compense le padding du message-bubble */
+}
+
+.message-header:hover {
+    background-color: rgba(0, 0, 0, 0.05);
+}
+
+/* Style spécifique pour les messages utilisateur */
+.message-bubble.user .message-header {
+    background-color: rgba(255, 255, 255, 0.15);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.message-bubble.user .message-header:hover {
+    background-color: rgba(255, 255, 255, 0.25);
+}
+
+/* Style spécifique pour les messages système */
+.message-bubble.system .message-header,
+.message-bubble.system-error .message-header {
+    background-color: rgba(0, 0, 0, 0.03);
+}
+
+/* Icône de pliage */
+.message-header .collapse-icon {
+    margin-left: auto;
+    transition: transform 0.3s ease;
+    color: #6c757d;
+}
+
+/* Rotation de l'icône quand plié */
+.message-wrapper.collapsed .collapse-icon {
+    transform: rotate(-90deg);
+}
+
+/* Corps du message */
+.message-body {
+    transition: all 0.3s ease;
+}
+
+/* Masquer le corps quand plié */
+.message-wrapper.collapsed .message-body {
+    display: none;
+}
+
+/* Aperçu du message plié */
+.message-preview {
+    flex: 1;
+    margin: 0 10px;
+    font-style: italic;
+    color: #6c757d;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: 0.9em;
+}
+
+/* Bordure arrondie quand plié */
+.message-wrapper.collapsed .message-header {
+    border-radius: 8px;
+    margin-bottom: 0;
+}
+
+/* Ajustement pour le contenu du message */
+.message-content {
+    padding-right: 10px; /* Espace pour éviter que le texte touche le bord */
+}
+
+/* Ajustement des boutons en bas du message */
+.message-body .buttons-bottom {
+    position: absolute;
+    right: 5px;
+    bottom: 5px;
+    display: flex;
+    gap: 5px;
+}
+
+/* ============================================
+   Styles pour la navigation - Phase 2
+   ============================================ */
+
+/* Barre de contrôle */
+.chat-controls {
+    margin-bottom: 10px;
+}
+
+/* Animation de surbrillance lors de la navigation */
+.message-wrapper.highlight {
+    animation: highlightPulse 2s ease-out;
+}
+
+@keyframes highlightPulse {
+    0% { 
+        background-color: rgba(255, 193, 7, 0.3);
+        box-shadow: 0 0 10px rgba(255, 193, 7, 0.5);
+    }
+    100% { 
+        background-color: transparent;
+        box-shadow: none;
+    }
+}
+
+/* Indicateur de position (optionnel - nice to have pour V2) */
+.nav-position-indicator {
+    position: fixed;
+    right: 20px;
+    top: 50%;
+    transform: translateY(-50%);
+    background: rgba(0, 0, 0, 0.7);
+    color: white;
+    padding: 10px;
+    border-radius: 8px;
+    z-index: 1000;
+    display: none;
+}
+
+.nav-position-indicator.show {
+    display: block;
+}

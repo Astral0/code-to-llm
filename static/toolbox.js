@@ -141,6 +141,23 @@ class ToolboxController {
         this.currentConversationId = null;
         this.conversations = [];
         
+        // Centralisation des sélecteurs CSS pour faciliter la maintenance
+        this.selectors = {
+            MESSAGE_WRAPPER: '.message-wrapper',
+            MESSAGE_BUBBLE: '.message-bubble',
+            MESSAGE_HEADER: '.message-header',
+            MESSAGE_BODY: '.message-body',
+            MESSAGE_CONTENT: '.message-content',
+            MESSAGE_PREVIEW: '.message-preview',
+            COLLAPSE_ICON: '.collapse-icon',
+            COLLAPSED_CLASS: 'collapsed',
+            HIGHLIGHT_CLASS: 'highlight',
+            CHAT_DISPLAY: '#chatDisplayArea',
+            COLLAPSE_ALL_BTN: '#collapseAllBtn',
+            EXPAND_ALL_BTN: '#expandAllBtn',
+            NAV_JUMP: '.nav-jump'
+        };
+        
         // Initialiser le provider selon le mode
         this.initializeProvider();
         
@@ -165,6 +182,10 @@ class ToolboxController {
     initializeUI() {
         // Définir le mode sur le body
         document.body.setAttribute('data-mode', this.mode);
+        
+        // Initialiser les contrôles de navigation
+        this.setupNavigationControls();
+        this.currentMessageIndex = { user: -1, assistant: -1 };
         
         // Afficher le mode actuel
         if (this.mode === 'browser') {
@@ -538,16 +559,77 @@ class ToolboxController {
         }
     }
     
-    // Méthode pour ajouter un message au chat (mode API uniquement)
+    /**
+     * Obtient l'icône FontAwesome correspondante au rôle du message
+     * @private
+     * @param {string} role - Le rôle du message (user, assistant, system, system-error)
+     * @returns {string} La classe CSS de l'icône FontAwesome
+     */
+    _getRoleIcon(role) {
+        const icons = {
+            'user': 'fas fa-user',
+            'assistant': 'fas fa-robot',
+            'system': 'fas fa-info-circle',
+            'system-error': 'fas fa-exclamation-triangle'
+        };
+        return icons[role] || 'fas fa-comment';
+    }
+
+    /**
+     * Obtient le label localisé pour un rôle de message
+     * @private
+     * @param {string} role - Le rôle du message
+     * @returns {string} Le label en français du rôle
+     */
+    _getRoleLabel(role) {
+        const labels = {
+            'user': 'Utilisateur',
+            'assistant': 'Assistant',
+            'system': 'Système',
+            'system-error': 'Erreur'
+        };
+        return labels[role] || role;
+    }
+
+    /**
+     * Met à jour l'aperçu textuel d'un message lorsqu'il est plié/déplié
+     * @private
+     * @param {HTMLElement} wrapper - L'élément .message-wrapper à mettre à jour
+     */
+    _updateMessagePreview(wrapper) {
+        const preview = wrapper.querySelector(this.selectors.MESSAGE_PREVIEW);
+        const content = wrapper.querySelector(this.selectors.MESSAGE_CONTENT);
+        
+        if (!preview || !content) return;
+        
+        if (wrapper.classList.contains('collapsed')) {
+            // Générer l'aperçu seulement au moment du pliage
+            const text = content.textContent.trim();
+            preview.textContent = text.substring(0, 100) + (text.length > 100 ? '...' : '');
+            preview.style.display = 'inline';
+        } else {
+            preview.textContent = '';
+            preview.style.display = 'none';
+        }
+    }
+
+    /**
+     * Ajoute ou met à jour un message dans l'interface de chat
+     * @param {string} role - Le rôle du message (user, assistant, system, system-error)
+     * @param {string} content - Le contenu du message
+     * @param {HTMLElement|null} existingDiv - Élément existant à mettre à jour (pour le streaming)
+     * @param {number|null} messageIndex - Index explicite du message dans chatHistory
+     * @returns {HTMLElement|null} L'élément div du message créé ou mis à jour
+     */
     appendMessageToChat(role, content, existingDiv = null, messageIndex = null) {
         if (this.mode !== 'api') return null;
         
-        const chatDisplayArea = document.getElementById('chatDisplayArea');
+        const chatDisplayArea = document.querySelector(this.selectors.CHAT_DISPLAY);
         if (!chatDisplayArea) return null;
         
         if (existingDiv) {
             // Mise à jour d'un message existant (pour le streaming)
-            const contentDiv = existingDiv.querySelector('.message-content');
+            const contentDiv = existingDiv.querySelector(this.selectors.MESSAGE_CONTENT);
             contentDiv.textContent = content;
             contentDiv.dataset.rawContent = content;
             contentDiv.dataset.markdownContent = marked.parse(content);
@@ -557,10 +639,48 @@ class ToolboxController {
         
         const messageWrapper = document.createElement('div');
         messageWrapper.className = 'message-wrapper';
+        // Utiliser l'index fourni, sinon calculer en fonction du rôle
+        if (messageIndex !== null && messageIndex !== undefined) {
+            messageWrapper.dataset.messageIndex = messageIndex;
+        } else {
+            // Pour les messages système, ne pas utiliser l'index car ils ne sont pas dans chatHistory
+            if (role !== 'system' && role !== 'system-error') {
+                // Pour les messages non-streamés, le .push() dans sendMessage a déjà été fait.
+                // L'index du nouvel élément est donc simplement le dernier du tableau.
+                // C'est plus simple et plus performant (O(1)) que de rechercher.
+                messageWrapper.dataset.messageIndex = this.chatHistory.length - 1;
+            }
+        }
+        
+        // Créer l'en-tête du message
+        const messageHeader = document.createElement('div');
+        messageHeader.className = 'message-header';
+        messageHeader.innerHTML = `
+            <span class="message-role">
+                <i class="${this._getRoleIcon(role)}"></i>
+                ${this._getRoleLabel(role)}
+            </span>
+            <span class="message-preview" style="display: none;"></span>
+            <i class="fas fa-chevron-down collapse-icon"></i>
+        `;
+        
+        // Ajouter l'événement de pliage/dépliage
+        messageHeader.addEventListener('click', (e) => {
+            // Important : éviter le pliage lors du clic sur les boutons d'action
+            if (!e.target.closest('.message-actions')) {
+                messageWrapper.classList.toggle('collapsed');
+                this._updateMessagePreview(messageWrapper);
+                this.saveNavigationState();
+            }
+        });
         
         const messageDiv = document.createElement('div');
         messageDiv.className = `message-bubble ${role}`;
         messageDiv.style.position = 'relative';
+        
+        // Créer le corps du message qui contiendra le contenu
+        const messageBody = document.createElement('div');
+        messageBody.className = 'message-body';
         
         // Créer un conteneur pour le contenu
         const contentDiv = document.createElement('div');
@@ -577,13 +697,15 @@ class ToolboxController {
         contentDiv.innerHTML = contentDiv.dataset.markdownContent;
         contentDiv.style.whiteSpace = 'normal';
         
-        messageDiv.appendChild(contentDiv);
+        messageBody.appendChild(contentDiv);
         
         // Ajouter les boutons de contrôle pour user et assistant
         if (role === 'user' || role === 'assistant') {
-            this.addMessageControls(messageDiv, role, contentDiv);
+            this.addMessageControls(messageBody, role, contentDiv);
         }
         
+        messageDiv.appendChild(messageHeader);
+        messageDiv.appendChild(messageBody);
         messageWrapper.appendChild(messageDiv);
         chatDisplayArea.appendChild(messageWrapper);
         this.autoScrollToBottom();
@@ -596,7 +718,13 @@ class ToolboxController {
         return messageDiv;
     }
     
-    addMessageControls(messageDiv, role, contentDiv) {
+    /**
+     * Ajoute les boutons de contrôle à un message (Fork, Copier, Relancer, Éditer)
+     * @param {HTMLElement} messageBody - Le conteneur du corps du message
+     * @param {string} role - Le rôle du message (user ou assistant)
+     * @param {HTMLElement} contentDiv - Le div contenant le contenu du message
+     */
+    addMessageControls(messageBody, role, contentDiv) {
         // Créer les boutons
         const buttonsContainer = document.createElement('div');
         buttonsContainer.className = 'buttons-bottom';
@@ -609,40 +737,18 @@ class ToolboxController {
         forkBtn.title = 'Créer une branche à partir d\'ici';
         forkBtn.style.cssText = 'opacity: 0.7; padding: 2px 6px; font-size: 12px;';
         
-        // Méthode plus simple : compter directement les message-bubble user/assistant
+        // Utiliser le data-message-index pour trouver l'index dans chatHistory
         forkBtn.addEventListener('click', () => {
-            // Trouver tous les messages user et assistant dans l'affichage
-            const allUserAssistantMessages = Array.from(
-                document.querySelectorAll('.message-bubble.user, .message-bubble.assistant')
-            );
+            // Récupérer l'index depuis le wrapper parent au moment du clic
+            const messageWrapper = messageBody.closest('.message-wrapper');
+            const messageIndex = messageWrapper ? parseInt(messageWrapper.dataset.messageIndex) : -1;
             
-            // Trouver la position de ce message dans la liste
-            const messageIndexInDisplay = allUserAssistantMessages.indexOf(messageDiv);
-            
-            console.log('Recherche d\'index:');
-            console.log('- Messages user/assistant trouvés:', allUserAssistantMessages.length);
-            console.log('- Index de ce message dans l\'affichage:', messageIndexInDisplay);
-            
-            // Maintenant, trouver l'index correspondant dans chatHistory
-            let realIndex = -1;
-            let displayIndex = 0;
-            
-            for (let i = 0; i < this.chatHistory.length; i++) {
-                if (this.chatHistory[i].role === 'user' || this.chatHistory[i].role === 'assistant') {
-                    if (displayIndex === messageIndexInDisplay) {
-                        realIndex = i;
-                        break;
-                    }
-                    displayIndex++;
-                }
+            if (messageIndex >= 0 && messageIndex < this.chatHistory.length) {
+                this.forkConversationFrom(messageIndex, contentDiv.dataset.rawContent, role);
+            } else {
+                console.error('Fork - Index invalide:', messageIndex, 'sur', this.chatHistory.length);
+                this.showError('Impossible de créer une branche depuis ce message');
             }
-            
-            console.log('- Index réel dans chatHistory:', realIndex);
-            if (realIndex >= 0) {
-                console.log('- Message trouvé:', this.chatHistory[realIndex]);
-            }
-            
-            this.forkConversationFrom(realIndex, contentDiv.dataset.rawContent, role);
         });
         
         buttonsContainer.appendChild(forkBtn);
@@ -709,8 +815,39 @@ class ToolboxController {
         
         buttonsContainer.appendChild(copyBtn);
         
-        // Bouton Éditer pour les messages utilisateur seulement
+        // Boutons pour les messages utilisateur seulement
         if (role === 'user') {
+            // Bouton Relancer (renvoyer le message)
+            const retryBtn = document.createElement('button');
+            retryBtn.className = 'btn btn-sm btn-outline-secondary retry-btn';
+            retryBtn.innerHTML = '<i class="fas fa-redo"></i>';
+            retryBtn.title = 'Relancer ce message';
+            retryBtn.style.cssText = 'opacity: 0.7; padding: 2px 6px; font-size: 12px;';
+            
+            retryBtn.addEventListener('click', async () => {
+                // Récupérer l'index depuis le wrapper parent au moment du clic
+                const messageWrapper = messageBody.closest('.message-wrapper');
+                const realIndex = messageWrapper ? parseInt(messageWrapper.dataset.messageIndex) : -1;
+                
+                if (realIndex >= 0) {
+                    // Supprimer tous les messages après celui-ci (garder jusqu'à ce message inclus)
+                    this.chatHistory = this.chatHistory.slice(0, realIndex);
+                    
+                    // Rafraîchir l'affichage
+                    this.refreshChatDisplay();
+                    
+                    // Message système pour indiquer le relancement
+                    this.appendMessageToChat('system', '🔄 Relancement du message...');
+                    
+                    // Renvoyer le message (il sera rajouté à l'historique par sendMessage)
+                    const messageContent = contentDiv.dataset.rawContent;
+                    await this.sendMessage(messageContent);
+                }
+            });
+            
+            buttonsContainer.appendChild(retryBtn);
+            
+            // Bouton Éditer
             const editBtn = document.createElement('button');
             editBtn.className = 'btn btn-sm btn-outline-secondary edit-btn';
             editBtn.innerHTML = '<i class="fas fa-edit"></i>';
@@ -718,26 +855,9 @@ class ToolboxController {
             editBtn.style.cssText = 'opacity: 0.7; padding: 2px 6px; font-size: 12px;';
             
             editBtn.addEventListener('click', () => {
-                // Trouver l'index de ce message dans chatHistory
-                const allUserAssistantMessages = Array.from(
-                    document.querySelectorAll('.message-bubble.user, .message-bubble.assistant')
-                );
-                
-                const messageIndexInDisplay = allUserAssistantMessages.indexOf(messageDiv);
-                
-                // Trouver l'index réel dans chatHistory
-                let realIndex = -1;
-                let displayIndex = 0;
-                
-                for (let i = 0; i < this.chatHistory.length; i++) {
-                    if (this.chatHistory[i].role === 'user' || this.chatHistory[i].role === 'assistant') {
-                        if (displayIndex === messageIndexInDisplay) {
-                            realIndex = i;
-                            break;
-                        }
-                        displayIndex++;
-                    }
-                }
+                // Récupérer l'index depuis le wrapper parent au moment du clic
+                const messageWrapper = messageBody.closest('.message-wrapper');
+                const realIndex = messageWrapper ? parseInt(messageWrapper.dataset.messageIndex) : -1;
                 
                 if (realIndex >= 0) {
                     this.editUserMessage(realIndex, contentDiv.dataset.rawContent);
@@ -747,7 +867,7 @@ class ToolboxController {
             buttonsContainer.appendChild(editBtn);
         }
         
-        messageDiv.appendChild(buttonsContainer);
+        messageBody.appendChild(buttonsContainer);
     }
     
     addCodeCopyButtons(container) {
@@ -1088,9 +1208,9 @@ class ToolboxController {
             );
         }
         
-        // 7. Afficher l'historique conservé
-        this.chatHistory.forEach(msg => {
-            this.appendMessageToChat(msg.role, msg.content);
+        // 7. Afficher l'historique conservé avec les index corrects
+        this.chatHistory.forEach((msg, index) => {
+            this.appendMessageToChat(msg.role, msg.content, null, index);
         });
         
         this.updateSaveButtonState();
@@ -1134,8 +1254,175 @@ class ToolboxController {
                 tokenSpan.textContent = '0';
             }
             
+            // Réinitialiser l'index de navigation
+            this.currentMessageIndex = { user: -1, assistant: -1 };
+            
             this.updateSaveButtonState();
         }
+    }
+    
+    /**
+     * Configure les contrôles de navigation globaux et les raccourcis clavier
+     */
+    setupNavigationControls() {
+        // Tout plier/déplier
+        document.querySelector(this.selectors.COLLAPSE_ALL_BTN)?.addEventListener('click', () => {
+            document.querySelectorAll(this.selectors.MESSAGE_WRAPPER).forEach(w => {
+                w.classList.add(this.selectors.COLLAPSED_CLASS);
+                this._updateMessagePreview(w);
+            });
+            this.saveNavigationState();
+        });
+        
+        document.querySelector(this.selectors.EXPAND_ALL_BTN)?.addEventListener('click', () => {
+            document.querySelectorAll(this.selectors.MESSAGE_WRAPPER).forEach(w => {
+                w.classList.remove(this.selectors.COLLAPSED_CLASS);
+                this._updateMessagePreview(w);
+            });
+            this.saveNavigationState();
+        });
+        
+        // Navigation par rôle
+        document.querySelectorAll(this.selectors.NAV_JUMP).forEach(link => {
+            link.addEventListener('click', (e) => {
+                e.preventDefault();
+                const role = e.currentTarget.dataset.role;
+                const direction = e.currentTarget.dataset.direction;
+                this.navigateToMessage(role, direction);
+            });
+        });
+        
+        // Raccourcis clavier
+        document.addEventListener('keydown', (e) => {
+            // CRUCIAL : Ne pas interférer avec la saisie de texte
+            if (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT') return;
+            
+            switch(e.key) {
+                case 'e':
+                    if (e.ctrlKey) {
+                        e.preventDefault();
+                        document.getElementById('expandAllBtn')?.click();
+                    }
+                    break;
+                case 'c':
+                    if (e.ctrlKey && e.shiftKey) {
+                        e.preventDefault();
+                        document.getElementById('collapseAllBtn')?.click();
+                    }
+                    break;
+                case 'ArrowUp':
+                    if (e.altKey) {
+                        e.preventDefault();
+                        this.navigateToMessage(e.shiftKey ? 'assistant' : 'user', 'prev');
+                    }
+                    break;
+                case 'ArrowDown':
+                    if (e.altKey) {
+                        e.preventDefault();
+                        this.navigateToMessage(e.shiftKey ? 'assistant' : 'user', 'next');
+                    }
+                    break;
+            }
+        });
+    }
+    
+    /**
+     * Navigation intelligente entre les messages par rôle
+     * @param {string} role - 'user' ou 'assistant'
+     * @param {string} direction - 'prev' ou 'next'
+     * 
+     * Note : Array.from() est nécessaire pour convertir la NodeList en Array
+     * et pouvoir utiliser .map(). La logique de boucle avec l'opérateur modulo
+     * assure une navigation circulaire fluide.
+     */
+    navigateToMessage(role, direction) {
+        // Conversion NodeList -> Array pour utiliser .map()
+        const messages = Array.from(document.querySelectorAll(`${this.selectors.MESSAGE_BUBBLE}.${role}`))
+            .map(el => el.closest(this.selectors.MESSAGE_WRAPPER))
+            .filter(Boolean);
+        
+        if (messages.length === 0) return;
+        
+        let index = this.currentMessageIndex[role];
+        
+        if (direction === 'next') {
+            // Modulo pour boucler à 0 après le dernier message
+            index = (index + 1) % messages.length;
+        } else { // prev
+            // Si index <= 0, on revient au dernier message
+            index = index <= 0 ? messages.length - 1 : index - 1;
+        }
+        
+        const target = messages[index];
+        if (target) {
+            // Déplier si nécessaire pour voir le contenu
+            target.classList.remove(this.selectors.COLLAPSED_CLASS);
+            this._updateMessagePreview(target);
+            
+            // Scroll avec highlight visuel
+            target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            target.classList.add(this.selectors.HIGHLIGHT_CLASS);
+            setTimeout(() => target.classList.remove(this.selectors.HIGHLIGHT_CLASS), 2000);
+            
+            this.currentMessageIndex[role] = index;
+        }
+    }
+    
+    /**
+     * Sauvegarde l'état actuel de la navigation dans localStorage
+     * Inclut les messages pliés, l'index de navigation et l'ID de conversation
+     */
+    saveNavigationState() {
+        const state = {
+            collapsed: Array.from(document.querySelectorAll(`${this.selectors.MESSAGE_WRAPPER}.${this.selectors.COLLAPSED_CLASS}`))
+                .map(w => parseInt(w.dataset.messageIndex))
+                .filter(index => !isNaN(index)),
+            currentIndex: this.currentMessageIndex,
+            conversationId: this.currentConversationId // Pour invalider si conversation change
+        };
+        localStorage.setItem('chat-navigation-state', JSON.stringify(state));
+    }
+    
+    /**
+     * Restaure l'état de navigation depuis localStorage
+     * Vérifie que l'état correspond à la conversation actuelle avant de l'appliquer
+     */
+    restoreNavigationState() {
+        const saved = localStorage.getItem('chat-navigation-state');
+        if (saved) {
+            try {
+                const state = JSON.parse(saved);
+                
+                // Vérifier que c'est la même conversation
+                if (state.conversationId !== this.currentConversationId) {
+                    localStorage.removeItem('chat-navigation-state');
+                    return;
+                }
+                
+                // Restaurer les messages pliés
+                state.collapsed?.forEach(index => {
+                    const wrapper = document.querySelector(`[data-message-index="${index}"]`);
+                    if (wrapper) {
+                        wrapper.classList.add(this.selectors.COLLAPSED_CLASS);
+                        this._updateMessagePreview(wrapper);
+                    }
+                });
+                
+                // Restaurer la position de navigation
+                this.currentMessageIndex = state.currentIndex || { user: -1, assistant: -1 };
+            } catch (e) {
+                console.warn('Impossible de restaurer l\'état de navigation:', e);
+                localStorage.removeItem('chat-navigation-state');
+            }
+        }
+    }
+    
+    /**
+     * Efface l'état de navigation sauvegardé et réinitialise les index
+     */
+    clearNavigationState() {
+        localStorage.removeItem('chat-navigation-state');
+        this.currentMessageIndex = { user: -1, assistant: -1 };
     }
     
     async exportChat() {
@@ -1538,6 +1825,11 @@ class ToolboxController {
                 this.updateSaveButtonState();
                 this.displayConversations();
                 
+                // Restaurer l'état de navigation après le chargement
+                setTimeout(() => {
+                    this.restoreNavigationState();
+                }, 150);
+                
                 // Message système après le rafraîchissement
                 setTimeout(() => {
                     this.appendMessageToChat('system', `Conversation "${conversation.title}" chargée`);
@@ -1786,16 +2078,19 @@ class ToolboxController {
         }
     }
     
+    /**
+     * Rafraîchit l'affichage complet du chat en recréant tous les messages
+     */
     refreshChatDisplay() {
-        const chatDisplayArea = document.getElementById('chatDisplayArea');
+        const chatDisplayArea = document.querySelector(this.selectors.CHAT_DISPLAY);
         if (!chatDisplayArea) return;
         
         chatDisplayArea.innerHTML = '';
         
-        // Afficher tous les messages de l'historique
-        this.chatHistory.forEach(msg => {
-            // Appel correct sans le 3ème paramètre (ou avec null)
-            this.appendMessageToChat(msg.role, msg.content);
+        // Afficher tous les messages de l'historique avec leur index correct
+        this.chatHistory.forEach((msg, index) => {
+            // Passer l'index explicite pour chaque message
+            this.appendMessageToChat(msg.role, msg.content, null, index);
         });
         
         // Mettre à jour le compteur de tokens

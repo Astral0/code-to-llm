@@ -79,7 +79,9 @@
         }
         .message-bubble .toggle-markdown-btn,
         .message-bubble .copy-btn,
-        .message-bubble .edit-btn {
+        .message-bubble .edit-btn,
+        .message-bubble .fork-btn,
+        .message-bubble .retry-btn {
             transition: opacity 0.2s;
             background: rgba(255, 255, 255, 0.9);
             border: 1px solid rgba(255, 255, 255, 0.5);
@@ -87,14 +89,18 @@
         }
         .message-bubble.user .toggle-markdown-btn,
         .message-bubble.user .copy-btn,
-        .message-bubble.user .edit-btn {
+        .message-bubble.user .edit-btn,
+        .message-bubble.user .fork-btn,
+        .message-bubble.user .retry-btn {
             background: rgba(255, 255, 255, 0.95);
             border: 1px solid rgba(255, 255, 255, 0.8);
             color: #007bff;
         }
         .message-bubble:hover .toggle-markdown-btn,
         .message-bubble:hover .copy-btn,
-        .message-bubble:hover .edit-btn {
+        .message-bubble:hover .edit-btn,
+        .message-bubble:hover .fork-btn,
+        .message-bubble:hover .retry-btn {
             opacity: 1 !important;
             background: white;
         }
@@ -410,6 +416,46 @@
                         <div class="d-flex justify-content-between align-items-center mb-2">
                             <div id="chat-info-bar" class="text-muted small api-mode-only">
                                 Tokens de la conversation : <span id="chat-token-count" class="fw-bold">0</span>
+                            </div>
+                            
+                            <!-- Barre de contrôle de navigation -->
+                            <div class="chat-controls btn-group btn-group-sm" role="group">
+                                <button type="button" class="btn btn-outline-secondary" id="collapseAllBtn" title="Tout plier (Ctrl+Shift+C)">
+                                    <i class="fas fa-compress-arrows-alt"></i>
+                                </button>
+                                <button type="button" class="btn btn-outline-secondary" id="expandAllBtn" title="Tout déplier (Ctrl+E)">
+                                    <i class="fas fa-expand-arrows-alt"></i>
+                                </button>
+                                <div class="btn-group btn-group-sm" role="group">
+                                    <button type="button" class="btn btn-outline-secondary dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false" title="Navigation rapide - Raccourcis: Alt+↑/↓ (utilisateur), Alt+Shift+↑/↓ (assistant)">
+                                        <i class="fas fa-search"></i> Navigation
+                                    </button>
+                                    <ul class="dropdown-menu">
+                                        <li><a class="dropdown-item nav-jump" href="#" data-role="user" data-direction="prev">
+                                            <i class="fas fa-user"></i> Message utilisateur précédent
+                                            <small class="text-muted float-end">Alt+↑</small>
+                                        </a></li>
+                                        <li><a class="dropdown-item nav-jump" href="#" data-role="user" data-direction="next">
+                                            <i class="fas fa-user"></i> Message utilisateur suivant
+                                            <small class="text-muted float-end">Alt+↓</small>
+                                        </a></li>
+                                        <li><hr class="dropdown-divider"></li>
+                                        <li><a class="dropdown-item nav-jump" href="#" data-role="assistant" data-direction="prev">
+                                            <i class="fas fa-robot"></i> Réponse précédente
+                                            <small class="text-muted float-end">Alt+Shift+↑</small>
+                                        </a></li>
+                                        <li><a class="dropdown-item nav-jump" href="#" data-role="assistant" data-direction="next">
+                                            <i class="fas fa-robot"></i> Réponse suivante
+                                            <small class="text-muted float-end">Alt+Shift+↓</small>
+                                        </a></li>
+                                        <li><hr class="dropdown-divider"></li>
+                                        <li class="px-3 py-1">
+                                            <small class="text-muted">
+                                                <i class="fas fa-info-circle"></i> Astuce : Cliquez sur l'en-tête d'un message pour le plier/déplier
+                                            </small>
+                                        </li>
+                                    </ul>
+                                </div>
                             </div>
                         </div>
                         
