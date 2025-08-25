@@ -141,6 +141,23 @@ class ToolboxController {
         this.currentConversationId = null;
         this.conversations = [];
         
+        // Centralisation des sélecteurs CSS pour faciliter la maintenance
+        this.selectors = {
+            MESSAGE_WRAPPER: '.message-wrapper',
+            MESSAGE_BUBBLE: '.message-bubble',
+            MESSAGE_HEADER: '.message-header',
+            MESSAGE_BODY: '.message-body',
+            MESSAGE_CONTENT: '.message-content',
+            MESSAGE_PREVIEW: '.message-preview',
+            COLLAPSE_ICON: '.collapse-icon',
+            COLLAPSED_CLASS: 'collapsed',
+            HIGHLIGHT_CLASS: 'highlight',
+            CHAT_DISPLAY: '#chatDisplayArea',
+            COLLAPSE_ALL_BTN: '#collapseAllBtn',
+            EXPAND_ALL_BTN: '#expandAllBtn',
+            NAV_JUMP: '.nav-jump'
+        };
+        
         // Initialiser le provider selon le mode
         this.initializeProvider();
         
@@ -542,7 +559,12 @@ class ToolboxController {
         }
     }
     
-    // Méthodes utilitaires privées pour les rôles
+    /**
+     * Obtient l'icône FontAwesome correspondante au rôle du message
+     * @private
+     * @param {string} role - Le rôle du message (user, assistant, system, system-error)
+     * @returns {string} La classe CSS de l'icône FontAwesome
+     */
     _getRoleIcon(role) {
         const icons = {
             'user': 'fas fa-user',
@@ -553,6 +575,12 @@ class ToolboxController {
         return icons[role] || 'fas fa-comment';
     }
 
+    /**
+     * Obtient le label localisé pour un rôle de message
+     * @private
+     * @param {string} role - Le rôle du message
+     * @returns {string} Le label en français du rôle
+     */
     _getRoleLabel(role) {
         const labels = {
             'user': 'Utilisateur',
@@ -563,10 +591,14 @@ class ToolboxController {
         return labels[role] || role;
     }
 
-    // Méthode privée pour gérer l'aperçu des messages pliés
+    /**
+     * Met à jour l'aperçu textuel d'un message lorsqu'il est plié/déplié
+     * @private
+     * @param {HTMLElement} wrapper - L'élément .message-wrapper à mettre à jour
+     */
     _updateMessagePreview(wrapper) {
-        const preview = wrapper.querySelector('.message-preview');
-        const content = wrapper.querySelector('.message-content');
+        const preview = wrapper.querySelector(this.selectors.MESSAGE_PREVIEW);
+        const content = wrapper.querySelector(this.selectors.MESSAGE_CONTENT);
         
         if (!preview || !content) return;
         
@@ -581,16 +613,23 @@ class ToolboxController {
         }
     }
 
-    // Méthode pour ajouter un message au chat (mode API uniquement)
+    /**
+     * Ajoute ou met à jour un message dans l'interface de chat
+     * @param {string} role - Le rôle du message (user, assistant, system, system-error)
+     * @param {string} content - Le contenu du message
+     * @param {HTMLElement|null} existingDiv - Élément existant à mettre à jour (pour le streaming)
+     * @param {number|null} messageIndex - Index explicite du message dans chatHistory
+     * @returns {HTMLElement|null} L'élément div du message créé ou mis à jour
+     */
     appendMessageToChat(role, content, existingDiv = null, messageIndex = null) {
         if (this.mode !== 'api') return null;
         
-        const chatDisplayArea = document.getElementById('chatDisplayArea');
+        const chatDisplayArea = document.querySelector(this.selectors.CHAT_DISPLAY);
         if (!chatDisplayArea) return null;
         
         if (existingDiv) {
             // Mise à jour d'un message existant (pour le streaming)
-            const contentDiv = existingDiv.querySelector('.message-content');
+            const contentDiv = existingDiv.querySelector(this.selectors.MESSAGE_CONTENT);
             contentDiv.textContent = content;
             contentDiv.dataset.rawContent = content;
             contentDiv.dataset.markdownContent = marked.parse(content);
@@ -600,7 +639,15 @@ class ToolboxController {
         
         const messageWrapper = document.createElement('div');
         messageWrapper.className = 'message-wrapper';
-        messageWrapper.dataset.messageIndex = messageIndex !== null ? messageIndex : this.chatHistory.length - 1;
+        // Utiliser l'index fourni, sinon calculer en fonction du rôle
+        if (messageIndex !== null) {
+            messageWrapper.dataset.messageIndex = messageIndex;
+        } else {
+            // Pour les messages système, ne pas utiliser l'index car ils ne sont pas dans chatHistory
+            if (role !== 'system' && role !== 'system-error') {
+                messageWrapper.dataset.messageIndex = this.chatHistory.length;
+            }
+        }
         
         // Créer l'en-tête du message
         const messageHeader = document.createElement('div');
@@ -668,6 +715,12 @@ class ToolboxController {
         return messageDiv;
     }
     
+    /**
+     * Ajoute les boutons de contrôle à un message (Fork, Copier, Relancer, Éditer)
+     * @param {HTMLElement} messageBody - Le conteneur du corps du message
+     * @param {string} role - Le rôle du message (user ou assistant)
+     * @param {HTMLElement} contentDiv - Le div contenant le contenu du message
+     */
     addMessageControls(messageBody, role, contentDiv) {
         // Créer les boutons
         const buttonsContainer = document.createElement('div');
@@ -1264,27 +1317,29 @@ class ToolboxController {
         }
     }
     
-    // Méthodes de navigation et contrôles globaux
+    /**
+     * Configure les contrôles de navigation globaux et les raccourcis clavier
+     */
     setupNavigationControls() {
         // Tout plier/déplier
-        document.getElementById('collapseAllBtn')?.addEventListener('click', () => {
-            document.querySelectorAll('.message-wrapper').forEach(w => {
-                w.classList.add('collapsed');
+        document.querySelector(this.selectors.COLLAPSE_ALL_BTN)?.addEventListener('click', () => {
+            document.querySelectorAll(this.selectors.MESSAGE_WRAPPER).forEach(w => {
+                w.classList.add(this.selectors.COLLAPSED_CLASS);
                 this._updateMessagePreview(w);
             });
             this.saveNavigationState();
         });
         
-        document.getElementById('expandAllBtn')?.addEventListener('click', () => {
-            document.querySelectorAll('.message-wrapper').forEach(w => {
-                w.classList.remove('collapsed');
+        document.querySelector(this.selectors.EXPAND_ALL_BTN)?.addEventListener('click', () => {
+            document.querySelectorAll(this.selectors.MESSAGE_WRAPPER).forEach(w => {
+                w.classList.remove(this.selectors.COLLAPSED_CLASS);
                 this._updateMessagePreview(w);
             });
             this.saveNavigationState();
         });
         
         // Navigation par rôle
-        document.querySelectorAll('.nav-jump').forEach(link => {
+        document.querySelectorAll(this.selectors.NAV_JUMP).forEach(link => {
             link.addEventListener('click', (e) => {
                 e.preventDefault();
                 const role = e.currentTarget.dataset.role;
@@ -1338,8 +1393,8 @@ class ToolboxController {
      */
     navigateToMessage(role, direction) {
         // Conversion NodeList -> Array pour utiliser .map()
-        const messages = Array.from(document.querySelectorAll(`.message-bubble.${role}`))
-            .map(el => el.closest('.message-wrapper'))
+        const messages = Array.from(document.querySelectorAll(`${this.selectors.MESSAGE_BUBBLE}.${role}`))
+            .map(el => el.closest(this.selectors.MESSAGE_WRAPPER))
             .filter(Boolean);
         
         if (messages.length === 0) return;
@@ -1357,29 +1412,37 @@ class ToolboxController {
         const target = messages[index];
         if (target) {
             // Déplier si nécessaire pour voir le contenu
-            target.classList.remove('collapsed');
+            target.classList.remove(this.selectors.COLLAPSED_CLASS);
             this._updateMessagePreview(target);
             
             // Scroll avec highlight visuel
             target.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            target.classList.add('highlight');
-            setTimeout(() => target.classList.remove('highlight'), 2000);
+            target.classList.add(this.selectors.HIGHLIGHT_CLASS);
+            setTimeout(() => target.classList.remove(this.selectors.HIGHLIGHT_CLASS), 2000);
             
             this.currentMessageIndex[role] = index;
         }
     }
     
-    // Méthodes de persistance de l'état de navigation
+    /**
+     * Sauvegarde l'état actuel de la navigation dans localStorage
+     * Inclut les messages pliés, l'index de navigation et l'ID de conversation
+     */
     saveNavigationState() {
         const state = {
-            collapsed: Array.from(document.querySelectorAll('.message-wrapper.collapsed'))
-                .map(w => parseInt(w.dataset.messageIndex)),
+            collapsed: Array.from(document.querySelectorAll(`${this.selectors.MESSAGE_WRAPPER}.${this.selectors.COLLAPSED_CLASS}`))
+                .map(w => parseInt(w.dataset.messageIndex))
+                .filter(index => !isNaN(index)),
             currentIndex: this.currentMessageIndex,
             conversationId: this.currentConversationId // Pour invalider si conversation change
         };
         localStorage.setItem('chat-navigation-state', JSON.stringify(state));
     }
     
+    /**
+     * Restaure l'état de navigation depuis localStorage
+     * Vérifie que l'état correspond à la conversation actuelle avant de l'appliquer
+     */
     restoreNavigationState() {
         const saved = localStorage.getItem('chat-navigation-state');
         if (saved) {
@@ -1396,7 +1459,7 @@ class ToolboxController {
                 state.collapsed?.forEach(index => {
                     const wrapper = document.querySelector(`[data-message-index="${index}"]`);
                     if (wrapper) {
-                        wrapper.classList.add('collapsed');
+                        wrapper.classList.add(this.selectors.COLLAPSED_CLASS);
                         this._updateMessagePreview(wrapper);
                     }
                 });
@@ -1410,6 +1473,9 @@ class ToolboxController {
         }
     }
     
+    /**
+     * Efface l'état de navigation sauvegardé et réinitialise les index
+     */
     clearNavigationState() {
         localStorage.removeItem('chat-navigation-state');
         this.currentMessageIndex = { user: -1, assistant: -1 };
@@ -2068,16 +2134,19 @@ class ToolboxController {
         }
     }
     
+    /**
+     * Rafraîchit l'affichage complet du chat en recréant tous les messages
+     */
     refreshChatDisplay() {
-        const chatDisplayArea = document.getElementById('chatDisplayArea');
+        const chatDisplayArea = document.querySelector(this.selectors.CHAT_DISPLAY);
         if (!chatDisplayArea) return;
         
         chatDisplayArea.innerHTML = '';
         
-        // Afficher tous les messages de l'historique
-        this.chatHistory.forEach(msg => {
-            // Appel correct sans le 3ème paramètre (ou avec null)
-            this.appendMessageToChat(msg.role, msg.content);
+        // Afficher tous les messages de l'historique avec leur index correct
+        this.chatHistory.forEach((msg, index) => {
+            // Passer l'index explicite pour chaque message
+            this.appendMessageToChat(msg.role, msg.content, null, index);
         });
         
         // Mettre à jour le compteur de tokens
