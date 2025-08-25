@@ -708,6 +708,45 @@ class ToolboxController {
         });
         
         buttonsContainer.appendChild(copyBtn);
+        
+        // Bouton Éditer pour les messages utilisateur seulement
+        if (role === 'user') {
+            const editBtn = document.createElement('button');
+            editBtn.className = 'btn btn-sm btn-outline-secondary edit-btn';
+            editBtn.innerHTML = '<i class="fas fa-edit"></i>';
+            editBtn.title = 'Éditer et régénérer';
+            editBtn.style.cssText = 'opacity: 0.7; padding: 2px 6px; font-size: 12px;';
+            
+            editBtn.addEventListener('click', () => {
+                // Trouver l'index de ce message dans chatHistory
+                const allUserAssistantMessages = Array.from(
+                    document.querySelectorAll('.message-bubble.user, .message-bubble.assistant')
+                );
+                
+                const messageIndexInDisplay = allUserAssistantMessages.indexOf(messageDiv);
+                
+                // Trouver l'index réel dans chatHistory
+                let realIndex = -1;
+                let displayIndex = 0;
+                
+                for (let i = 0; i < this.chatHistory.length; i++) {
+                    if (this.chatHistory[i].role === 'user' || this.chatHistory[i].role === 'assistant') {
+                        if (displayIndex === messageIndexInDisplay) {
+                            realIndex = i;
+                            break;
+                        }
+                        displayIndex++;
+                    }
+                }
+                
+                if (realIndex >= 0) {
+                    this.editUserMessage(realIndex, contentDiv.dataset.rawContent);
+                }
+            });
+            
+            buttonsContainer.appendChild(editBtn);
+        }
+        
         messageDiv.appendChild(buttonsContainer);
     }
     
@@ -892,6 +931,71 @@ class ToolboxController {
                 cancelEdit();
             }
         });
+    }
+    
+    editUserMessage(messageIndex, originalContent) {
+        // Vérifier que Bootstrap est disponible
+        if (!window.bootstrap) {
+            console.error('Bootstrap non disponible');
+            return;
+        }
+        
+        const modalElement = document.getElementById('editMessageModal');
+        if (!modalElement) {
+            console.error('Modal editMessageModal non trouvé');
+            return;
+        }
+        
+        const modal = new bootstrap.Modal(modalElement);
+        const textarea = document.getElementById('editMessageTextarea');
+        const confirmBtn = document.getElementById('confirmEditBtn');
+        
+        // Pré-remplir avec le contenu actuel
+        textarea.value = originalContent;
+        
+        // Retirer l'ancien listener s'il existe
+        const newConfirmBtn = confirmBtn.cloneNode(true);
+        confirmBtn.parentNode.replaceChild(newConfirmBtn, confirmBtn);
+        
+        // Ajouter le nouveau listener
+        newConfirmBtn.addEventListener('click', () => {
+            const newContent = textarea.value.trim();
+            
+            if (newContent === '') {
+                alert('Le message ne peut pas être vide');
+                return;
+            }
+            
+            // Tronquer l'historique jusqu'à ce message (exclu)
+            this.chatHistory = this.chatHistory.slice(0, messageIndex);
+            
+            // Ajouter le nouveau message modifié
+            this.chatHistory.push({
+                role: 'user',
+                content: newContent
+            });
+            
+            // Rafraîchir l'affichage
+            this.refreshChatDisplay();
+            
+            // Fermer le modal
+            modal.hide();
+            
+            // Envoyer le message modifié au LLM pour obtenir une nouvelle réponse
+            if (this.isStreamEnabled) {
+                this.sendMessageStream(newContent);
+            } else {
+                this.sendMessage(newContent);
+            }
+            
+            // Message système pour indiquer l'édition
+            this.appendMessageToChat('system', 
+                '✏️ Message édité et historique tronqué. Nouvelle réponse en cours de génération...'
+            );
+        });
+        
+        // Afficher le modal
+        modal.show();
     }
     
     async forkConversationFrom(messageIndex, originalContent, role) {
