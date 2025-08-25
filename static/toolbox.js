@@ -640,7 +640,7 @@ class ToolboxController {
         const messageWrapper = document.createElement('div');
         messageWrapper.className = 'message-wrapper';
         // Utiliser l'index fourni, sinon calculer en fonction du rôle
-        if (messageIndex !== null) {
+        if (messageIndex !== null && messageIndex !== undefined) {
             messageWrapper.dataset.messageIndex = messageIndex;
         } else {
             // Pour les messages système, ne pas utiliser l'index car ils ne sont pas dans chatHistory
@@ -730,9 +730,6 @@ class ToolboxController {
         buttonsContainer.className = 'buttons-bottom';
         buttonsContainer.style.cssText = 'display: flex; gap: 5px;';
         
-        // Trouver le message-bubble parent (car maintenant on reçoit messageBody)
-        const messageBubble = messageBody.closest('.message-bubble');
-        
         // Bouton Fork pour tous les messages (user et assistant)
         const forkBtn = document.createElement('button');
         forkBtn.className = 'btn btn-sm btn-outline-secondary fork-btn';
@@ -740,40 +737,18 @@ class ToolboxController {
         forkBtn.title = 'Créer une branche à partir d\'ici';
         forkBtn.style.cssText = 'opacity: 0.7; padding: 2px 6px; font-size: 12px;';
         
-        // Méthode plus simple : compter directement les message-bubble user/assistant
+        // Utiliser le data-message-index pour trouver l'index dans chatHistory
         forkBtn.addEventListener('click', () => {
-            // Trouver tous les messages user et assistant dans l'affichage
-            const allUserAssistantMessages = Array.from(
-                document.querySelectorAll('.message-bubble.user, .message-bubble.assistant')
-            );
+            // Récupérer l'index depuis le wrapper parent au moment du clic
+            const messageWrapper = messageBody.closest('.message-wrapper');
+            const messageIndex = messageWrapper ? parseInt(messageWrapper.dataset.messageIndex) : -1;
             
-            // Trouver la position de ce message dans la liste
-            const messageIndexInDisplay = allUserAssistantMessages.indexOf(messageBubble);
-            
-            console.log('Recherche d\'index:');
-            console.log('- Messages user/assistant trouvés:', allUserAssistantMessages.length);
-            console.log('- Index de ce message dans l\'affichage:', messageIndexInDisplay);
-            
-            // Maintenant, trouver l'index correspondant dans chatHistory
-            let realIndex = -1;
-            let displayIndex = 0;
-            
-            for (let i = 0; i < this.chatHistory.length; i++) {
-                if (this.chatHistory[i].role === 'user' || this.chatHistory[i].role === 'assistant') {
-                    if (displayIndex === messageIndexInDisplay) {
-                        realIndex = i;
-                        break;
-                    }
-                    displayIndex++;
-                }
+            if (messageIndex >= 0 && messageIndex < this.chatHistory.length) {
+                this.forkConversationFrom(messageIndex, contentDiv.dataset.rawContent, role);
+            } else {
+                console.error('Fork - Index invalide:', messageIndex, 'sur', this.chatHistory.length);
+                this.showError('Impossible de créer une branche depuis ce message');
             }
-            
-            console.log('- Index réel dans chatHistory:', realIndex);
-            if (realIndex >= 0) {
-                console.log('- Message trouvé:', this.chatHistory[realIndex]);
-            }
-            
-            this.forkConversationFrom(realIndex, contentDiv.dataset.rawContent, role);
         });
         
         buttonsContainer.appendChild(forkBtn);
@@ -850,26 +825,9 @@ class ToolboxController {
             retryBtn.style.cssText = 'opacity: 0.7; padding: 2px 6px; font-size: 12px;';
             
             retryBtn.addEventListener('click', async () => {
-                // Trouver l'index de ce message dans chatHistory
-                const allUserAssistantMessages = Array.from(
-                    document.querySelectorAll('.message-bubble.user, .message-bubble.assistant')
-                );
-                
-                const messageIndexInDisplay = allUserAssistantMessages.indexOf(messageBubble);
-                
-                // Trouver l'index réel dans chatHistory
-                let realIndex = -1;
-                let displayIndex = 0;
-                
-                for (let i = 0; i < this.chatHistory.length; i++) {
-                    if (this.chatHistory[i].role === 'user' || this.chatHistory[i].role === 'assistant') {
-                        if (displayIndex === messageIndexInDisplay) {
-                            realIndex = i;
-                            break;
-                        }
-                        displayIndex++;
-                    }
-                }
+                // Récupérer l'index depuis le wrapper parent au moment du clic
+                const messageWrapper = messageBody.closest('.message-wrapper');
+                const realIndex = messageWrapper ? parseInt(messageWrapper.dataset.messageIndex) : -1;
                 
                 if (realIndex >= 0) {
                     // Supprimer tous les messages après celui-ci (garder jusqu'à ce message inclus)
@@ -897,26 +855,9 @@ class ToolboxController {
             editBtn.style.cssText = 'opacity: 0.7; padding: 2px 6px; font-size: 12px;';
             
             editBtn.addEventListener('click', () => {
-                // Trouver l'index de ce message dans chatHistory
-                const allUserAssistantMessages = Array.from(
-                    document.querySelectorAll('.message-bubble.user, .message-bubble.assistant')
-                );
-                
-                const messageIndexInDisplay = allUserAssistantMessages.indexOf(messageBubble);
-                
-                // Trouver l'index réel dans chatHistory
-                let realIndex = -1;
-                let displayIndex = 0;
-                
-                for (let i = 0; i < this.chatHistory.length; i++) {
-                    if (this.chatHistory[i].role === 'user' || this.chatHistory[i].role === 'assistant') {
-                        if (displayIndex === messageIndexInDisplay) {
-                            realIndex = i;
-                            break;
-                        }
-                        displayIndex++;
-                    }
-                }
+                // Récupérer l'index depuis le wrapper parent au moment du clic
+                const messageWrapper = messageBody.closest('.message-wrapper');
+                const realIndex = messageWrapper ? parseInt(messageWrapper.dataset.messageIndex) : -1;
                 
                 if (realIndex >= 0) {
                     this.editUserMessage(realIndex, contentDiv.dataset.rawContent);
@@ -1267,9 +1208,9 @@ class ToolboxController {
             );
         }
         
-        // 7. Afficher l'historique conservé
-        this.chatHistory.forEach(msg => {
-            this.appendMessageToChat(msg.role, msg.content);
+        // 7. Afficher l'historique conservé avec les index corrects
+        this.chatHistory.forEach((msg, index) => {
+            this.appendMessageToChat(msg.role, msg.content, null, index);
         });
         
         this.updateSaveButtonState();
