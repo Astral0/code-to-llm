@@ -166,6 +166,10 @@ class ToolboxController {
         // Définir le mode sur le body
         document.body.setAttribute('data-mode', this.mode);
         
+        // Initialiser les contrôles de navigation
+        this.setupNavigationControls();
+        this.currentMessageIndex = { user: -1, assistant: -1 };
+        
         // Afficher le mode actuel
         if (this.mode === 'browser') {
             // Afficher la notification du mode navigateur
@@ -538,6 +542,45 @@ class ToolboxController {
         }
     }
     
+    // Méthodes utilitaires privées pour les rôles
+    _getRoleIcon(role) {
+        const icons = {
+            'user': 'fas fa-user',
+            'assistant': 'fas fa-robot',
+            'system': 'fas fa-info-circle',
+            'system-error': 'fas fa-exclamation-triangle'
+        };
+        return icons[role] || 'fas fa-comment';
+    }
+
+    _getRoleLabel(role) {
+        const labels = {
+            'user': 'Utilisateur',
+            'assistant': 'Assistant',
+            'system': 'Système',
+            'system-error': 'Erreur'
+        };
+        return labels[role] || role;
+    }
+
+    // Méthode privée pour gérer l'aperçu des messages pliés
+    _updateMessagePreview(wrapper) {
+        const preview = wrapper.querySelector('.message-preview');
+        const content = wrapper.querySelector('.message-content');
+        
+        if (!preview || !content) return;
+        
+        if (wrapper.classList.contains('collapsed')) {
+            // Générer l'aperçu seulement au moment du pliage
+            const text = content.textContent.trim();
+            preview.textContent = text.substring(0, 100) + (text.length > 100 ? '...' : '');
+            preview.style.display = 'inline';
+        } else {
+            preview.textContent = '';
+            preview.style.display = 'none';
+        }
+    }
+
     // Méthode pour ajouter un message au chat (mode API uniquement)
     appendMessageToChat(role, content, existingDiv = null, messageIndex = null) {
         if (this.mode !== 'api') return null;
@@ -557,10 +600,37 @@ class ToolboxController {
         
         const messageWrapper = document.createElement('div');
         messageWrapper.className = 'message-wrapper';
+        messageWrapper.dataset.messageIndex = messageIndex !== null ? messageIndex : this.chatHistory.length - 1;
+        
+        // Créer l'en-tête du message
+        const messageHeader = document.createElement('div');
+        messageHeader.className = 'message-header';
+        messageHeader.innerHTML = `
+            <span class="message-role">
+                <i class="${this._getRoleIcon(role)}"></i>
+                ${this._getRoleLabel(role)}
+            </span>
+            <span class="message-preview" style="display: none;"></span>
+            <i class="fas fa-chevron-down collapse-icon"></i>
+        `;
+        
+        // Ajouter l'événement de pliage/dépliage
+        messageHeader.addEventListener('click', (e) => {
+            // Important : éviter le pliage lors du clic sur les boutons d'action
+            if (!e.target.closest('.message-actions')) {
+                messageWrapper.classList.toggle('collapsed');
+                this._updateMessagePreview(messageWrapper);
+                this.saveNavigationState();
+            }
+        });
         
         const messageDiv = document.createElement('div');
         messageDiv.className = `message-bubble ${role}`;
         messageDiv.style.position = 'relative';
+        
+        // Créer le corps du message qui contiendra le contenu
+        const messageBody = document.createElement('div');
+        messageBody.className = 'message-body';
         
         // Créer un conteneur pour le contenu
         const contentDiv = document.createElement('div');
@@ -577,13 +647,15 @@ class ToolboxController {
         contentDiv.innerHTML = contentDiv.dataset.markdownContent;
         contentDiv.style.whiteSpace = 'normal';
         
-        messageDiv.appendChild(contentDiv);
+        messageBody.appendChild(contentDiv);
         
         // Ajouter les boutons de contrôle pour user et assistant
         if (role === 'user' || role === 'assistant') {
-            this.addMessageControls(messageDiv, role, contentDiv);
+            this.addMessageControls(messageBody, role, contentDiv);
         }
         
+        messageDiv.appendChild(messageHeader);
+        messageDiv.appendChild(messageBody);
         messageWrapper.appendChild(messageDiv);
         chatDisplayArea.appendChild(messageWrapper);
         this.autoScrollToBottom();
@@ -596,11 +668,14 @@ class ToolboxController {
         return messageDiv;
     }
     
-    addMessageControls(messageDiv, role, contentDiv) {
+    addMessageControls(messageBody, role, contentDiv) {
         // Créer les boutons
         const buttonsContainer = document.createElement('div');
         buttonsContainer.className = 'buttons-bottom';
         buttonsContainer.style.cssText = 'display: flex; gap: 5px;';
+        
+        // Trouver le message-bubble parent (car maintenant on reçoit messageBody)
+        const messageBubble = messageBody.closest('.message-bubble');
         
         // Bouton Fork pour tous les messages (user et assistant)
         const forkBtn = document.createElement('button');
@@ -617,7 +692,7 @@ class ToolboxController {
             );
             
             // Trouver la position de ce message dans la liste
-            const messageIndexInDisplay = allUserAssistantMessages.indexOf(messageDiv);
+            const messageIndexInDisplay = allUserAssistantMessages.indexOf(messageBubble);
             
             console.log('Recherche d\'index:');
             console.log('- Messages user/assistant trouvés:', allUserAssistantMessages.length);
@@ -709,8 +784,56 @@ class ToolboxController {
         
         buttonsContainer.appendChild(copyBtn);
         
-        // Bouton Éditer pour les messages utilisateur seulement
+        // Boutons pour les messages utilisateur seulement
         if (role === 'user') {
+            // Bouton Relancer (renvoyer le message)
+            const retryBtn = document.createElement('button');
+            retryBtn.className = 'btn btn-sm btn-outline-secondary retry-btn';
+            retryBtn.innerHTML = '<i class="fas fa-redo"></i>';
+            retryBtn.title = 'Relancer ce message';
+            retryBtn.style.cssText = 'opacity: 0.7; padding: 2px 6px; font-size: 12px;';
+            
+            retryBtn.addEventListener('click', async () => {
+                // Trouver l'index de ce message dans chatHistory
+                const allUserAssistantMessages = Array.from(
+                    document.querySelectorAll('.message-bubble.user, .message-bubble.assistant')
+                );
+                
+                const messageIndexInDisplay = allUserAssistantMessages.indexOf(messageBubble);
+                
+                // Trouver l'index réel dans chatHistory
+                let realIndex = -1;
+                let displayIndex = 0;
+                
+                for (let i = 0; i < this.chatHistory.length; i++) {
+                    if (this.chatHistory[i].role === 'user' || this.chatHistory[i].role === 'assistant') {
+                        if (displayIndex === messageIndexInDisplay) {
+                            realIndex = i;
+                            break;
+                        }
+                        displayIndex++;
+                    }
+                }
+                
+                if (realIndex >= 0) {
+                    // Supprimer tous les messages après celui-ci (garder jusqu'à ce message inclus)
+                    this.chatHistory = this.chatHistory.slice(0, realIndex);
+                    
+                    // Rafraîchir l'affichage
+                    this.refreshChatDisplay();
+                    
+                    // Message système pour indiquer le relancement
+                    this.appendMessageToChat('system', '🔄 Relancement du message...');
+                    
+                    // Renvoyer le message (il sera rajouté à l'historique par sendMessage)
+                    const messageContent = contentDiv.dataset.rawContent;
+                    await this.sendMessage(messageContent);
+                }
+            });
+            
+            buttonsContainer.appendChild(retryBtn);
+            
+            // Bouton Éditer
             const editBtn = document.createElement('button');
             editBtn.className = 'btn btn-sm btn-outline-secondary edit-btn';
             editBtn.innerHTML = '<i class="fas fa-edit"></i>';
@@ -723,7 +846,7 @@ class ToolboxController {
                     document.querySelectorAll('.message-bubble.user, .message-bubble.assistant')
                 );
                 
-                const messageIndexInDisplay = allUserAssistantMessages.indexOf(messageDiv);
+                const messageIndexInDisplay = allUserAssistantMessages.indexOf(messageBubble);
                 
                 // Trouver l'index réel dans chatHistory
                 let realIndex = -1;
@@ -747,7 +870,7 @@ class ToolboxController {
             buttonsContainer.appendChild(editBtn);
         }
         
-        messageDiv.appendChild(buttonsContainer);
+        messageBody.appendChild(buttonsContainer);
     }
     
     addCodeCopyButtons(container) {
@@ -1134,8 +1257,162 @@ class ToolboxController {
                 tokenSpan.textContent = '0';
             }
             
+            // Réinitialiser l'index de navigation
+            this.currentMessageIndex = { user: -1, assistant: -1 };
+            
             this.updateSaveButtonState();
         }
+    }
+    
+    // Méthodes de navigation et contrôles globaux
+    setupNavigationControls() {
+        // Tout plier/déplier
+        document.getElementById('collapseAllBtn')?.addEventListener('click', () => {
+            document.querySelectorAll('.message-wrapper').forEach(w => {
+                w.classList.add('collapsed');
+                this._updateMessagePreview(w);
+            });
+            this.saveNavigationState();
+        });
+        
+        document.getElementById('expandAllBtn')?.addEventListener('click', () => {
+            document.querySelectorAll('.message-wrapper').forEach(w => {
+                w.classList.remove('collapsed');
+                this._updateMessagePreview(w);
+            });
+            this.saveNavigationState();
+        });
+        
+        // Navigation par rôle
+        document.querySelectorAll('.nav-jump').forEach(link => {
+            link.addEventListener('click', (e) => {
+                e.preventDefault();
+                const role = e.currentTarget.dataset.role;
+                const direction = e.currentTarget.dataset.direction;
+                this.navigateToMessage(role, direction);
+            });
+        });
+        
+        // Raccourcis clavier
+        document.addEventListener('keydown', (e) => {
+            // CRUCIAL : Ne pas interférer avec la saisie de texte
+            if (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT') return;
+            
+            switch(e.key) {
+                case 'e':
+                    if (e.ctrlKey) {
+                        e.preventDefault();
+                        document.getElementById('expandAllBtn')?.click();
+                    }
+                    break;
+                case 'c':
+                    if (e.ctrlKey && e.shiftKey) {
+                        e.preventDefault();
+                        document.getElementById('collapseAllBtn')?.click();
+                    }
+                    break;
+                case 'ArrowUp':
+                    if (e.altKey) {
+                        e.preventDefault();
+                        this.navigateToMessage(e.shiftKey ? 'assistant' : 'user', 'prev');
+                    }
+                    break;
+                case 'ArrowDown':
+                    if (e.altKey) {
+                        e.preventDefault();
+                        this.navigateToMessage(e.shiftKey ? 'assistant' : 'user', 'next');
+                    }
+                    break;
+            }
+        });
+    }
+    
+    /**
+     * Navigation intelligente entre les messages par rôle
+     * @param {string} role - 'user' ou 'assistant'
+     * @param {string} direction - 'prev' ou 'next'
+     * 
+     * Note : Array.from() est nécessaire pour convertir la NodeList en Array
+     * et pouvoir utiliser .map(). La logique de boucle avec l'opérateur modulo
+     * assure une navigation circulaire fluide.
+     */
+    navigateToMessage(role, direction) {
+        // Conversion NodeList -> Array pour utiliser .map()
+        const messages = Array.from(document.querySelectorAll(`.message-bubble.${role}`))
+            .map(el => el.closest('.message-wrapper'))
+            .filter(Boolean);
+        
+        if (messages.length === 0) return;
+        
+        let index = this.currentMessageIndex[role];
+        
+        if (direction === 'next') {
+            // Modulo pour boucler à 0 après le dernier message
+            index = (index + 1) % messages.length;
+        } else { // prev
+            // Si index <= 0, on revient au dernier message
+            index = index <= 0 ? messages.length - 1 : index - 1;
+        }
+        
+        const target = messages[index];
+        if (target) {
+            // Déplier si nécessaire pour voir le contenu
+            target.classList.remove('collapsed');
+            this._updateMessagePreview(target);
+            
+            // Scroll avec highlight visuel
+            target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            target.classList.add('highlight');
+            setTimeout(() => target.classList.remove('highlight'), 2000);
+            
+            this.currentMessageIndex[role] = index;
+        }
+    }
+    
+    // Méthodes de persistance de l'état de navigation
+    saveNavigationState() {
+        const state = {
+            collapsed: Array.from(document.querySelectorAll('.message-wrapper.collapsed'))
+                .map(w => parseInt(w.dataset.messageIndex)),
+            currentIndex: this.currentMessageIndex,
+            conversationId: this.currentConversationId // Pour invalider si conversation change
+        };
+        localStorage.setItem('chat-navigation-state', JSON.stringify(state));
+    }
+    
+    restoreNavigationState() {
+        const saved = localStorage.getItem('chat-navigation-state');
+        if (saved) {
+            try {
+                const state = JSON.parse(saved);
+                
+                // Vérifier que c'est la même conversation
+                if (state.conversationId !== this.currentConversationId) {
+                    localStorage.removeItem('chat-navigation-state');
+                    return;
+                }
+                
+                // Restaurer les messages pliés
+                state.collapsed?.forEach(index => {
+                    const wrapper = document.querySelector(`[data-message-index="${index}"]`);
+                    if (wrapper) {
+                        wrapper.classList.add('collapsed');
+                        this._updateMessagePreview(wrapper);
+                    }
+                });
+                
+                // Restaurer la position de navigation
+                this.currentMessageIndex = state.currentIndex || { user: -1, assistant: -1 };
+            } catch (e) {
+                console.warn('Impossible de restaurer l\'état de navigation:', e);
+                localStorage.removeItem('chat-navigation-state');
+            }
+        }
+    }
+    
+    clearNavigationState() {
+        localStorage.removeItem('chat-navigation-state');
+        this.currentMessageIndex = { user: -1, assistant: -1 };
     }
     
     async exportChat() {
@@ -1537,6 +1814,11 @@ class ToolboxController {
                 this.updateContextStatus(!!this.mainContext);
                 this.updateSaveButtonState();
                 this.displayConversations();
+                
+                // Restaurer l'état de navigation après le chargement
+                setTimeout(() => {
+                    this.restoreNavigationState();
+                }, 150);
                 
                 // Message système après le rafraîchissement
                 setTimeout(() => {
