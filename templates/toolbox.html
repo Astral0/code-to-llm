@@ -414,8 +414,18 @@
                         <div id="llm-error-chat" class="alert alert-danger p-2 d-none mb-3" role="alert" style="font-size: 0.9em;"></div>
                         
                         <div class="d-flex justify-content-between align-items-center mb-2">
-                            <div id="chat-info-bar" class="text-muted small api-mode-only">
-                                Tokens de la conversation : <span id="chat-token-count" class="fw-bold">0</span>
+                            <div class="d-flex align-items-center gap-3">
+                                <div id="chat-info-bar" class="text-muted small api-mode-only">
+                                    Tokens de la conversation : <span id="chat-token-count" class="fw-bold">0</span>
+                                </div>
+                                
+                                <!-- Sélecteur de LLM -->
+                                <div class="d-flex align-items-center api-mode-only">
+                                    <label for="llmSelector" class="form-label-sm me-2 mb-0 text-muted">Modèle:</label>
+                                    <select class="form-select form-select-sm" id="llmSelector" style="width: auto;" title="Choisir le modèle LLM à utiliser">
+                                        <!-- Options chargées dynamiquement -->
+                                    </select>
+                                </div>
                             </div>
                             
                             <!-- Barre de contrôle de navigation -->

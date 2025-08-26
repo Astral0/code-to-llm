@@ -25,11 +25,12 @@ class LlmApiService(BaseService):
         Initialise le service LLM API.
         
         Args:
-            config: Dictionnaire de configuration contenant les paramètres LLM
+            config: Dictionnaire de configuration contenant les modèles LLM
             logger: Logger optionnel
         """
         super().__init__(config, logger)
-        self._llm_config = config  # Stocker la config LLM directement
+        self._llm_models = config.get('models', {})
+        self._default_llm_id = config.get('default_id', None)
         self._setup_http_session()
         
     def validate_config(self):
@@ -54,9 +55,12 @@ class LlmApiService(BaseService):
         self.session.mount("http://", adapter)
         self.session.mount("https://", adapter)
     
-    def _get_llm_config(self) -> Dict[str, Any]:
-        """Retourne la configuration LLM injectée."""
-        return self._llm_config
+    def get_available_models(self) -> List[Dict[str, Any]]:
+        """Retourne la liste des modèles LLM disponibles."""
+        return [
+            {'id': llm_id, 'name': model['name'], 'default': model.get('default', False)}
+            for llm_id, model in self._llm_models.items()
+        ]
     
     def _build_openai_request(self, api_url: str, model: str, messages: List[Dict[str, str]], 
                               stream: bool = False, temperature: float = None, 
@@ -86,63 +90,77 @@ class LlmApiService(BaseService):
             
         return target_url, payload
     
-    def _prepare_request(self, chat_history: List[Dict[str, str]], stream: bool = False) -> tuple:
+    def _prepare_request(self, chat_history: List[Dict[str, str]], stream: bool = False, llm_id: Optional[str] = None) -> tuple:
         """
         Prépare les données pour la requête LLM.
         
+        Args:
+            chat_history: Historique de la conversation
+            stream: Mode streaming ou non
+            llm_id: ID du modèle à utiliser (optionnel, fallback sur le défaut)
+            
         Returns:
-            tuple: (url, headers, payload)
+            tuple: (url, headers, payload, ssl_verify)
         """
-        llm_config = self._get_llm_config()
+        # Sélectionner le modèle à utiliser
+        target_llm_id = llm_id if llm_id and llm_id in self._llm_models else self._default_llm_id
+        if not target_llm_id:
+            raise LlmApiServiceException('No default or valid LLM configured.')
         
-        if not llm_config['enabled']:
-            raise LlmApiServiceException('LLM feature is not enabled in config.ini')
+        final_config = self._llm_models[target_llm_id]
         
-        if not llm_config['url'] or not llm_config['model']:
-            raise LlmApiServiceException('LLM server configuration is incomplete in config.ini')
+        if not final_config.get('url') or not final_config.get('model'):
+            raise LlmApiServiceException(f'LLM configuration is incomplete for model {target_llm_id}')
         
         headers = {"Content-Type": "application/json"}
-        if llm_config['apikey']:
-            headers["Authorization"] = f"Bearer {llm_config['apikey']}"
+        if final_config.get('apikey'):
+            headers["Authorization"] = f"Bearer {final_config['apikey']}"
         
-        if llm_config['api_type'] == "openai":
+        if final_config.get('api_type') == "openai":
             # Utiliser la méthode factorisée
             target_url, payload = self._build_openai_request(
-                api_url=llm_config['url'],
-                model=llm_config['model'],
+                api_url=final_config['url'],
+                model=final_config['model'],
                 messages=chat_history,
                 stream=stream,
-                temperature=llm_config.get('temperature'),
-                max_tokens=llm_config.get('max_tokens')
+                temperature=final_config.get('temperature'),
+                max_tokens=final_config.get('max_tokens')
             )
         else:  # ollama
             prompt = "\n\n".join([f"{msg['role'].upper()}: {msg['content']}" for msg in chat_history])
             payload = {
-                "model": llm_config['model'],
+                "model": final_config['model'],
                 "prompt": prompt,
                 "stream": stream
             }
             # Ajouter les paramètres optionnels pour Ollama aussi
-            if 'temperature' in llm_config and llm_config['temperature'] is not None:
-                payload['temperature'] = llm_config['temperature']
+            if final_config.get('temperature') is not None:
+                payload['temperature'] = final_config['temperature']
                 
-            target_url = llm_config['url'].rstrip('/') + "/api/generate"
+            target_url = final_config['url'].rstrip('/') + "/api/generate"
         
-        return target_url, headers, payload, llm_config['ssl_verify']
+        return target_url, headers, payload, final_config.get('ssl_verify', True)
     
-    def send_to_llm(self, chat_history: List[Dict[str, str]], stream: bool = False) -> Dict[str, Any]:
+    def send_to_llm(self, chat_history: List[Dict[str, str]], stream: bool = False, llm_id: Optional[str] = None) -> Dict[str, Any]:
         """
         Envoie l'historique du chat au LLM et retourne la réponse.
         
         Args:
             chat_history: Liste des messages de la conversation
             stream: Si True, utilise le mode streaming
+            llm_id: ID du modèle à utiliser (optionnel)
             
         Returns:
             Dict contenant la réponse ou une erreur
         """
         try:
-            target_url, headers, payload, ssl_verify = self._prepare_request(chat_history, stream)
+            target_url, headers, payload, ssl_verify = self._prepare_request(chat_history, stream, llm_id)
+            
+            # Récupérer la config du modèle utilisé
+            target_llm_id = llm_id if llm_id and llm_id in self._llm_models else self._default_llm_id
+            if not target_llm_id:
+                raise LlmApiServiceException('No model configured')
+            current_config = self._llm_models[target_llm_id]
             
             self.logger.info(f"Sending request to LLM at {target_url} (SSL verify: {ssl_verify})")
             
@@ -158,7 +176,7 @@ class LlmApiService(BaseService):
                 headers=headers,
                 json=payload,
                 verify=ssl_verify,
-                timeout=self._llm_config.get('timeout_seconds', 300)
+                timeout=current_config.get('timeout_seconds', 300)
             )
             
             # Gérer les erreurs HTTP
@@ -172,8 +190,7 @@ class LlmApiService(BaseService):
             response.raise_for_status()
             
             # Parser la réponse selon le type d'API
-            llm_config = self._get_llm_config()
-            if llm_config['api_type'] == "openai":
+            if current_config.get('api_type') == "openai":
                 result = response.json()
                 if 'choices' in result and result['choices']:
                     return {'response': result['choices'][0]['message']['content']}
@@ -199,7 +216,8 @@ class LlmApiService(BaseService):
                           on_start: Optional[Callable[[], None]] = None,
                           on_chunk: Optional[Callable[[str], None]] = None,
                           on_end: Optional[Callable[[int], None]] = None,
-                          on_error: Optional[Callable[[str], None]] = None) -> Dict[str, Any]:
+                          on_error: Optional[Callable[[str], None]] = None,
+                          llm_id: Optional[str] = None) -> Dict[str, Any]:
         """
         Envoie l'historique au LLM en mode streaming avec callbacks.
         
@@ -209,12 +227,19 @@ class LlmApiService(BaseService):
             on_chunk: Callback appelé pour chaque chunk reçu
             on_end: Callback appelé à la fin avec le nombre total de tokens
             on_error: Callback appelé en cas d'erreur
+            llm_id: ID du modèle à utiliser (optionnel)
             
         Returns:
             Dict contenant le statut ou une erreur
         """
         try:
-            target_url, headers, payload, ssl_verify = self._prepare_request(chat_history, stream=True)
+            target_url, headers, payload, ssl_verify = self._prepare_request(chat_history, stream=True, llm_id=llm_id)
+            
+            # Récupérer la config du modèle utilisé
+            target_llm_id = llm_id if llm_id and llm_id in self._llm_models else self._default_llm_id
+            if not target_llm_id:
+                raise LlmApiServiceException('No model configured')
+            current_config = self._llm_models[target_llm_id]
             
             self.logger.info(f"Sending streaming request to LLM at {target_url}")
             
@@ -231,7 +256,7 @@ class LlmApiService(BaseService):
                 json=payload,
                 verify=ssl_verify,
                 stream=True,
-                timeout=self._llm_config.get('timeout_seconds', 300)
+                timeout=current_config.get('timeout_seconds', 300)
             )
             
             # Gérer les erreurs HTTP
@@ -250,14 +275,13 @@ class LlmApiService(BaseService):
                 on_start()
             
             # Parser la réponse en streaming
-            llm_config = self._get_llm_config()
             accumulated_content = ""
             
             for line in response.iter_lines():
                 if line:
                     line_str = line.decode('utf-8')
                     
-                    if llm_config['api_type'] == "openai":
+                    if current_config.get('api_type') == "openai":
                         if line_str.startswith('data: '):
                             data_str = line_str[6:]
                             if data_str == '[DONE]':

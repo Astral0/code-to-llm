@@ -36,9 +36,13 @@ class ApiProvider {
             };
         }
         
-        // Utiliser l'API existante
+        // Récupérer le modèle sélectionné
+        const llmSelector = document.getElementById('llmSelector');
+        const selectedLlmId = llmSelector ? llmSelector.value : null;
+        
+        // Utiliser l'API existante avec le modèle sélectionné
         if (window.pywebview && window.pywebview.api) {
-            return await window.pywebview.api.send_to_llm(historyToSend, false);
+            return await window.pywebview.api.send_to_llm(historyToSend, false, selectedLlmId);
         }
         return { error: 'API non disponible' };
     }
@@ -56,9 +60,13 @@ class ApiProvider {
             };
         }
         
-        // Utiliser l'API de streaming
+        // Récupérer le modèle sélectionné
+        const llmSelector = document.getElementById('llmSelector');
+        const selectedLlmId = llmSelector ? llmSelector.value : null;
+        
+        // Utiliser l'API de streaming avec le modèle sélectionné
         if (window.pywebview && window.pywebview.api) {
-            return await window.pywebview.api.send_to_llm_stream(historyToSend, callbackId);
+            return await window.pywebview.api.send_to_llm_stream(historyToSend, callbackId, selectedLlmId);
         }
         return { error: 'API non disponible' };
     }
@@ -186,6 +194,11 @@ class ToolboxController {
         // Initialiser les contrôles de navigation
         this.setupNavigationControls();
         this.currentMessageIndex = { user: -1, assistant: -1 };
+        
+        // Charger les modèles LLM disponibles (mode API uniquement)
+        if (this.mode === 'api') {
+            this.loadAvailableLlmModels();
+        }
         
         // Afficher le mode actuel
         if (this.mode === 'browser') {
@@ -390,6 +403,63 @@ class ToolboxController {
         } catch (error) {
             console.error('Erreur lors de l\'import du contexte:', error);
             this.showError('Erreur lors de l\'import du contexte.');
+        }
+    }
+    
+    async loadAvailableLlmModels() {
+        try {
+            const models = await window.pywebview.api.get_available_llms();
+            const selector = document.getElementById('llmSelector');
+            
+            if (!selector || !models || models.length === 0) {
+                console.warn('Aucun modèle LLM disponible ou sélecteur non trouvé');
+                return;
+            }
+            
+            // Vider le sélecteur
+            selector.innerHTML = '';
+            
+            // Récupérer le modèle précédemment sélectionné depuis le localStorage
+            const savedModelId = localStorage.getItem('selectedLlmModel');
+            let defaultFound = false;
+            
+            // Ajouter les options
+            models.forEach(model => {
+                const option = document.createElement('option');
+                option.value = model.id;
+                option.textContent = model.name;
+                
+                // Sélectionner le modèle par défaut ou le modèle sauvegardé
+                if (savedModelId && model.id === savedModelId) {
+                    option.selected = true;
+                    defaultFound = true;
+                } else if (!savedModelId && model.default) {
+                    option.selected = true;
+                    defaultFound = true;
+                }
+                
+                selector.appendChild(option);
+            });
+            
+            // Si aucun modèle n'est sélectionné, sélectionner le premier
+            if (!defaultFound && models.length > 0) {
+                selector.selectedIndex = 0;
+            }
+            
+            // Sauvegarder le choix lors du changement
+            selector.addEventListener('change', () => {
+                localStorage.setItem('selectedLlmModel', selector.value);
+                console.log('Modèle LLM sélectionné:', selector.value);
+            });
+            
+            // Sauvegarder le choix initial
+            if (selector.value) {
+                localStorage.setItem('selectedLlmModel', selector.value);
+            }
+            
+            console.log('Modèles LLM chargés:', models.length);
+        } catch (error) {
+            console.error('Erreur lors du chargement des modèles LLM:', error);
         }
     }
     
