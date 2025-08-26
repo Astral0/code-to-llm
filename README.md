@@ -19,6 +19,8 @@ Une application de bureau complète pour préparer, analyser et interagir avec v
 - **📚 Bibliothèque de Prompts** : Une collection de prompts prédéfinis et personnalisables pour des tâches complexes : analyse d'architecture, audit de sécurité, planification de fonctionnalités, etc.
 - **🔄 Intégration `git diff`** : Analysez en un clic les modifications en attente (`--staged`) pour générer des messages de commit ou obtenir des revues de code.
 - **📄 Export Multi-format** : Exportez vos conversations au format Markdown, DOCX ou PDF.
+- **⚡ Gestion Avancée des Erreurs** : Système de retry intelligent avec circuit breaker, failover automatique entre endpoints LLM et notifications visuelles en temps réel.
+- **🌐 Support Proxy d'Entreprise** : Configuration proxy HTTP/HTTPS pour accéder aux LLM externes depuis un environnement d'entreprise avec restrictions réseau.
 
 ## ⚙️ Installation
 
@@ -62,6 +64,10 @@ Une application de bureau complète pour préparer, analyser et interagir avec v
     temperature = 0.7
     max_tokens = 4096
     default = true  # Ce modèle sera sélectionné par défaut
+    # Configuration proxy optionnelle (décommentez si nécessaire)
+    # proxy_http = http://proxy.entreprise.com:8080
+    # proxy_https = http://proxy.entreprise.com:8080
+    # proxy_no_proxy = localhost,127.0.0.1,.entreprise.local
     
     [LLM:Ollama Local]
     url = http://localhost:11434
@@ -197,6 +203,85 @@ extension_blacklist = .png, .jpg, .exe, .dll, .so, .pdf, .zip, .woff
 # Extensions immédiatement acceptées sans analyse de contenu
 extension_whitelist = .py, .js, .html, .css, .json, .md, .txt, .sh
 ```
+
+## 🆕 Nouvelles Fonctionnalités (Décembre 2024)
+
+### ⚡ Gestion Intelligente des Erreurs Réseau
+
+**Système de Retry avec Circuit Breaker** :
+- **Retry automatique** : Jusqu'à 6 tentatives avec backoff exponentiel (1s → 30s)
+- **Circuit breaker** : Désactive temporairement les endpoints défaillants après 3 échecs
+- **Failover intelligent** : Bascule automatiquement entre les modèles LLM configurés
+- **Notifications visuelles** : Affichage en temps réel des tentatives et erreurs
+- **Récupération automatique** : Réactivation progressive des endpoints après 2 minutes
+
+Cette fonctionnalité est particulièrement utile pour gérer :
+- Les erreurs 504 Gateway Timeout
+- Les surcharges serveur
+- Les problèmes de connectivité réseau
+- Les limites de quota atteintes
+
+### 🌐 Support Proxy d'Entreprise
+
+**Configuration proxy pour accéder aux LLM externes** :
+
+```ini
+[LLM:OpenAI-External]
+url = https://api.openai.com/v1
+apikey = YOUR_API_KEY
+model = gpt-4
+enabled = true
+# Configuration proxy pour sortir sur Internet
+proxy_http = http://proxy.entreprise.com:8080
+proxy_https = http://proxy.entreprise.com:8080
+proxy_no_proxy = localhost,127.0.0.1,.entreprise.local
+```
+
+**Caractéristiques** :
+- Support proxy HTTP/HTTPS avec authentification
+- Configuration indépendante par modèle LLM
+- Exclusions via `proxy_no_proxy`
+- Compatible avec SummarizerLLM et TitleGeneratorLLM
+- Script de diagnostic inclus : `python test_proxy_llm.py`
+
+**Cas d'usage** : Permet de basculer vers des services externes (OpenAI, Anthropic) lorsque les quotas internes sont atteints.
+
+### 📊 Monitoring et Santé des Endpoints
+
+- **Tableau de bord de santé** : Visualisation du statut de chaque endpoint LLM
+- **Métriques** : Taux de succès, nombre de requêtes, dernière erreur
+- **API de statut** : Récupération programmatique de l'état des services
+- **Réinitialisation manuelle** : Possibilité de réactiver un endpoint
+
+### 🛠️ Outils de Développement
+
+**Scripts de test inclus** :
+- `test_retry_manager.py` : Test du système de retry et failover
+- `test_proxy_llm.py` : Vérification de la configuration proxy
+- `test_llm_error_display.py` : Test des notifications d'erreur
+- `test_error_notification.html` : Interface de test des notifications visuelles
+
+**Documentation technique** :
+- `docs/retry-failover-strategy.md` : Guide complet du système de retry
+- `docs/proxy-configuration.md` : Configuration détaillée du proxy avec exemples
+
+## 🔧 Dépannage
+
+### Erreurs fréquentes
+
+**Erreur 504 Gateway Timeout** :
+- Le système de retry prend automatiquement le relais
+- Vérifiez que plusieurs modèles LLM sont configurés pour le failover
+- Augmentez `timeout_seconds` si nécessaire
+
+**Erreur de connexion via proxy** :
+- Vérifiez la configuration proxy dans `config.ini`
+- Exécutez `python test_proxy_llm.py` pour diagnostiquer
+- Assurez-vous que le domaine n'est pas bloqué par la politique d'entreprise
+
+**Limite de tokens atteinte** :
+- Basculez vers un autre modèle LLM via le sélecteur de l'interface
+- Configurez un modèle externe avec proxy si nécessaire
 
 ## 🤝 Contribution
 

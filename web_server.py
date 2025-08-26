@@ -220,6 +220,10 @@ def load_config():
                     SUMMARIZER_LLM_APIKEY = config.get('SummarizerLLM', 'apikey', fallback=None) # Conserver car présent dans template
                     SUMMARIZER_LLM_MODEL = config.get('SummarizerLLM', 'model', fallback=None)
                     SUMMARIZER_LLM_API_TYPE = config.get('SummarizerLLM', 'api_type', fallback='ollama').lower()
+                    # Configuration proxy pour SummarizerLLM
+                    SUMMARIZER_PROXY_HTTP = config.get('SummarizerLLM', 'proxy_http', fallback=None)
+                    SUMMARIZER_PROXY_HTTPS = config.get('SummarizerLLM', 'proxy_https', fallback=None)
+                    SUMMARIZER_PROXY_NO_PROXY = config.get('SummarizerLLM', 'proxy_no_proxy', fallback=None)
                     SUMMARIZER_LLM_PROMPT = config.get('SummarizerLLM', 'summarizer_prompt', fallback='''Tu es un assistant d'analyse de code spécialisé. Ta seule et unique tâche est de générer un résumé JSON à partir d'un fichier de code source, en suivant un format STRICT et IMPÉRATIF.
  
  --- DEBUT DE L'EXEMPLE ---
@@ -1049,6 +1053,24 @@ def summarize_code_with_llm(content: str, file_path: str, model: str) -> str:
         "stream": False
     }
     
+    # Configuration proxy si définie
+    proxies = None
+    if 'SUMMARIZER_PROXY_HTTP' in globals() or 'SUMMARIZER_PROXY_HTTPS' in globals():
+        proxies = {}
+        if 'SUMMARIZER_PROXY_HTTP' in globals() and SUMMARIZER_PROXY_HTTP:
+            proxies['http'] = SUMMARIZER_PROXY_HTTP
+        if 'SUMMARIZER_PROXY_HTTPS' in globals() and SUMMARIZER_PROXY_HTTPS:
+            proxies['https'] = SUMMARIZER_PROXY_HTTPS
+        
+        # Gérer les exclusions no_proxy
+        if 'SUMMARIZER_PROXY_NO_PROXY' in globals() and SUMMARIZER_PROXY_NO_PROXY:
+            import os
+            os.environ['NO_PROXY'] = SUMMARIZER_PROXY_NO_PROXY
+            os.environ['no_proxy'] = SUMMARIZER_PROXY_NO_PROXY
+        
+        if proxies:
+            app.logger.info(f"Using proxy configuration for Summarizer: {proxies}")
+    
     try:
         target_url = SUMMARIZER_LLM_URL
         # Normalisation de l'URL pour /api/generate
@@ -1061,7 +1083,7 @@ def summarize_code_with_llm(content: str, file_path: str, model: str) -> str:
                 target_url = normalized_url
         
         app.logger.info(f"Calling Summarizer API (Ollama) at URL: {target_url}")
-        response = requests.post(target_url, headers=headers, json=payload, timeout=SUMMARIZER_LLM_TIMEOUT)
+        response = requests.post(target_url, headers=headers, json=payload, timeout=SUMMARIZER_LLM_TIMEOUT, proxies=proxies)
         response.raise_for_status()
         summary_json = response.json()
         llm_response_str = summary_json.get('response', '{}')

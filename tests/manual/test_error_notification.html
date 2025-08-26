@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>Test des notifications d'erreur LLM</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+            background-color: #f0f0f0;
+        }
+        .test-button {
+            background-color: #007bff;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 10px;
+            font-size: 16px;
+        }
+        .test-button:hover {
+            background-color: #0056b3;
+        }
+        .status {
+            margin: 20px 0;
+            padding: 15px;
+            background-color: white;
+            border-radius: 4px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+        }
+    </style>
+</head>
+<body>
+    <h1>Test des notifications d'erreur LLM</h1>
+    
+    <div class="status">
+        <h3>Instructions :</h3>
+        <p>Cliquez sur les boutons ci-dessous pour tester différents types de notifications d'erreur.</p>
+        <p>Les notifications devraient apparaître en haut à droite de la page.</p>
+    </div>
+    
+    <div>
+        <button class="test-button" onclick="testTimeout()">Test Timeout</button>
+        <button class="test-button" onclick="testRetry()">Test Retry</button>
+        <button class="test-button" onclick="testFailover()">Test Failover</button>
+        <button class="test-button" onclick="testCritical()">Test Erreur Critique</button>
+        <button class="test-button" onclick="testHealthStatus()">Afficher Statut de Santé</button>
+    </div>
+    
+    <div class="status">
+        <h3>Historique des notifications :</h3>
+        <div id="history"></div>
+    </div>
+    
+    <!-- Charger le script du handler d'erreurs -->
+    <script src="static/llm_error_handler.js"></script>
+    
+    <script>
+        // Vérifier que le handler est bien chargé
+        window.addEventListener('DOMContentLoaded', () => {
+            if (window.LLMErrorHandler) {
+                console.log('Handler d\'erreurs LLM chargé avec succès');
+                updateHistory();
+            } else {
+                console.error('Handler d\'erreurs LLM non trouvé !');
+                alert('Erreur : Le handler d\'erreurs n\'est pas chargé');
+            }
+        });
+        
+        // Écouter les événements d'erreur
+        window.addEventListener('llm-error', (event) => {
+            console.log('Événement d\'erreur LLM reçu:', event.detail);
+            updateHistory();
+        });
+        
+        function testTimeout() {
+            window.handleLLMError({
+                type: 'llm_error',
+                message: 'Timeout après 30 secondes sur iag.edf.fr',
+                attempt: -1,
+                wait_time: 0,
+                timestamp: Date.now() / 1000
+            });
+        }
+        
+        function testRetry() {
+            // Simuler plusieurs tentatives
+            let attempt = 1;
+            const simulate = () => {
+                window.handleLLMError({
+                    type: 'llm_error',
+                    message: `Tentative ${attempt}: Échec sur iag.edf.fr. Nouvelle tentative dans ${Math.pow(2, attempt-1)}s...`,
+                    attempt: attempt,
+                    wait_time: Math.pow(2, attempt-1),
+                    timestamp: Date.now() / 1000
+                });
+                attempt++;
+                if (attempt <= 3) {
+                    setTimeout(simulate, 2000);
+                }
+            };
+            simulate();
+        }
+        
+        function testFailover() {
+            window.handleLLMError({
+                type: 'llm_error',
+                message: 'Basculement vers le modèle: oneapi',
+                attempt: 0,
+                wait_time: 0,
+                timestamp: Date.now() / 1000
+            });
+        }
+        
+        function testCritical() {
+            window.handleLLMError({
+                type: 'llm_error',
+                message: 'Erreur critique: Tous les serveurs LLM sont indisponibles',
+                attempt: -1,
+                wait_time: 0,
+                timestamp: Date.now() / 1000
+            });
+        }
+        
+        function testHealthStatus() {
+            if (window.LLMErrorHandler) {
+                window.LLMErrorHandler.showHealthStatus({
+                    'iag.edf.fr': {
+                        state: 'degraded',
+                        success_rate: 0.75,
+                        consecutive_failures: 2,
+                        total_requests: 150
+                    },
+                    'oneapi': {
+                        state: 'healthy',
+                        success_rate: 0.95,
+                        consecutive_failures: 0,
+                        total_requests: 80
+                    },
+                    'litellm': {
+                        state: 'circuit_open',
+                        success_rate: 0.10,
+                        consecutive_failures: 5,
+                        total_requests: 50
+                    }
+                });
+            }
+        }
+        
+        function updateHistory() {
+            if (window.LLMErrorHandler) {
+                const history = window.LLMErrorHandler.getErrorHistory();
+                const historyDiv = document.getElementById('history');
+                
+                if (history.length === 0) {
+                    historyDiv.innerHTML = '<p>Aucune notification pour le moment.</p>';
+                } else {
+                    historyDiv.innerHTML = '<ul>' + 
+                        history.slice(-5).reverse().map(item => 
+                            `<li>${new Date(item.timestamp).toLocaleTimeString()} - ${item.message}</li>`
+                        ).join('') + 
+                        '</ul>';
+                }
+            }
+        }
+    </script>
+</body>
+</html>

@@ -3,12 +3,13 @@ import json
 import logging
 import re
 import time
-from typing import Dict, Any, Optional, List, Callable
+from typing import Dict, Any, Optional, List, Callable, Tuple
 from requests.adapters import HTTPAdapter
 from requests.packages.urllib3.util.retry import Retry
 from configparser import ConfigParser
 from .base_service import BaseService
 from .exceptions import LlmApiServiceException, NetworkException, RateLimitException
+from .retry_manager import RetryManager
 
 
 class LlmApiService(BaseService):
@@ -33,34 +34,101 @@ class LlmApiService(BaseService):
         self._default_llm_id = config.get('default_id', None)
         self._setup_http_session()
         
+        # Initialiser le RetryManager si on a plusieurs modèles
+        if self._llm_models:
+            self.retry_manager = RetryManager(
+                endpoints=list(self._llm_models.keys()),
+                max_retries=6,  # Plus de tentatives
+                initial_backoff=1.0,
+                max_backoff=30.0,
+                backoff_multiplier=2.0,
+                jitter=True,
+                failure_threshold=3,  # Circuit breaker après 3 échecs
+                recovery_time=120  # 2 minutes avant de réessayer
+            )
+        else:
+            self.retry_manager = None
+        
+        # Callbacks pour le suivi des erreurs
+        self.error_callbacks = []
+        
     def validate_config(self):
         """Valide la configuration du service LLM."""
         # La validation sera faite lors de l'appel aux méthodes
         pass
     
     def _setup_http_session(self):
-        """Configure une session HTTP avec retry strategy intelligente."""
+        """Configure une session HTTP de base sans retry (géré par RetryManager)."""
         self.session = requests.Session()
         
-        # Configuration du retry avec backoff exponentiel
-        retry_strategy = Retry(
-            total=3,
-            status_forcelist=[500, 502, 503, 504],  # Erreurs récupérables seulement
-            allowed_methods=["GET", "POST"],  # Changé de method_whitelist (déprécié)
-            backoff_factor=1,
-            respect_retry_after_header=True  # Support du 429 Too Many Requests
-        )
-        
-        adapter = HTTPAdapter(max_retries=retry_strategy)
+        # Pas de retry automatique ici, le RetryManager s'en charge
+        adapter = HTTPAdapter(max_retries=0)
         self.session.mount("http://", adapter)
         self.session.mount("https://", adapter)
     
+    def _get_proxy_config(self, config: Dict[str, Any]) -> Optional[Dict[str, str]]:
+        """Extrait la configuration proxy d'un modèle LLM.
+        
+        Args:
+            config: Configuration du modèle LLM
+            
+        Returns:
+            Dict avec les proxies ou None si pas de proxy configuré
+        """
+        proxy_http = config.get('proxy_http')
+        proxy_https = config.get('proxy_https')
+        
+        if not proxy_http and not proxy_https:
+            self.logger.debug("Pas de configuration proxy détectée")
+            return None
+        
+        proxies = {}
+        if proxy_http:
+            proxies['http'] = proxy_http
+            self.logger.info(f"Proxy HTTP configuré: {proxy_http}")
+        if proxy_https:
+            proxies['https'] = proxy_https
+            self.logger.info(f"Proxy HTTPS configuré: {proxy_https}")
+        
+        # Gérer les exclusions no_proxy
+        no_proxy = config.get('proxy_no_proxy')
+        if no_proxy:
+            # Configurer les exclusions via les variables d'environnement
+            # car requests utilise ces variables pour les exclusions
+            import os
+            os.environ['NO_PROXY'] = no_proxy
+            os.environ['no_proxy'] = no_proxy
+            self.logger.info(f"Exclusions proxy (NO_PROXY): {no_proxy}")
+        
+        self.logger.info(f"Configuration proxy finale: {proxies}")
+        return proxies
+    
     def get_available_models(self) -> List[Dict[str, Any]]:
         """Retourne la liste des modèles LLM disponibles."""
-        return [
+        models = [
             {'id': llm_id, 'name': model['name'], 'default': model.get('default', False)}
             for llm_id, model in self._llm_models.items()
         ]
+        
+        # Ajouter le statut de santé si disponible
+        if self.retry_manager:
+            health_status = self.retry_manager.get_health_status()
+            for model in models:
+                if model['id'] in health_status:
+                    model['health'] = health_status[model['id']]
+        
+        return models
+    
+    def get_endpoints_health(self) -> Optional[Dict[str, Any]]:
+        """Retourne le statut de santé de tous les endpoints."""
+        if self.retry_manager:
+            return self.retry_manager.get_health_status()
+        return None
+    
+    def reset_endpoint_health(self, endpoint_id: str):
+        """Réinitialise le statut de santé d'un endpoint."""
+        if self.retry_manager:
+            self.retry_manager.reset_endpoint(endpoint_id)
     
     def _build_openai_request(self, api_url: str, model: str, messages: List[Dict[str, str]], 
                               stream: bool = False, temperature: float = None, 
@@ -107,6 +175,7 @@ class LlmApiService(BaseService):
         if not target_llm_id:
             raise LlmApiServiceException('No default or valid LLM configured.')
         
+        self.logger.debug(f"Préparation de la requête pour le modèle: {target_llm_id}")
         final_config = self._llm_models[target_llm_id]
         
         if not final_config.get('url') or not final_config.get('model'):
@@ -139,7 +208,23 @@ class LlmApiService(BaseService):
                 
             target_url = final_config['url'].rstrip('/') + "/api/generate"
         
+        self.logger.debug(f"URL finale construite: {target_url}")
+        self.logger.debug(f"Type d'API: {final_config.get('api_type')}")
+        self.logger.debug(f"Nombre de messages dans l'historique: {len(chat_history)}")
+        
         return target_url, headers, payload, final_config.get('ssl_verify', True)
+    
+    def register_error_callback(self, callback: Callable[[str, int, float], None]):
+        """Enregistre un callback pour les notifications d'erreur."""
+        self.error_callbacks.append(callback)
+    
+    def _notify_error(self, message: str, attempt: int = 0, wait_time: float = 0):
+        """Notifie les callbacks d'une erreur."""
+        for callback in self.error_callbacks:
+            try:
+                callback(message, attempt, wait_time)
+            except Exception as e:
+                self.logger.warning(f"Erreur dans le callback d'erreur: {e}")
     
     def send_to_llm(self, chat_history: List[Dict[str, str]], stream: bool = False, llm_id: Optional[str] = None) -> Dict[str, Any]:
         """
@@ -153,6 +238,40 @@ class LlmApiService(BaseService):
         Returns:
             Dict contenant la réponse ou une erreur
         """
+        # Si on a un retry manager et plusieurs endpoints, l'utiliser
+        if self.retry_manager and len(self._llm_models) > 1:
+            def execute_request(endpoint_id: str) -> Dict[str, Any]:
+                return self._send_to_llm_internal(chat_history, stream, endpoint_id)
+            
+            def on_retry(attempt: int, endpoint: str, wait_time: float):
+                msg = f"Tentative {attempt}: Échec sur {endpoint}. Nouvelle tentative dans {wait_time:.1f}s..."
+                self._notify_error(msg, attempt, wait_time)
+            
+            def on_endpoint_switch(new_endpoint: str):
+                model_name = self._llm_models[new_endpoint].get('name', new_endpoint)
+                msg = f"Basculement vers le modèle: {model_name}"
+                self._notify_error(msg, 0, 0)
+            
+            try:
+                return self.retry_manager.execute_with_retry(
+                    execute_request,
+                    on_retry=on_retry,
+                    on_endpoint_switch=on_endpoint_switch
+                )
+            except Exception as e:
+                # Ajouter le statut de santé des endpoints dans l'erreur
+                health_status = self.retry_manager.get_health_status()
+                self.logger.error(f"Tous les endpoints ont échoué. Statut: {health_status}")
+                self._notify_error(f"Erreur critique: Tous les serveurs LLM sont indisponibles", -1, 0)
+                raise LlmApiServiceException(f"Tous les endpoints LLM ont échoué: {str(e)}")
+        else:
+            # Pas de retry manager, utiliser l'ancienne méthode
+            return self._send_to_llm_internal(chat_history, stream, llm_id)
+    
+    def _send_to_llm_internal(self, chat_history: List[Dict[str, str]], stream: bool = False, llm_id: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Méthode interne pour envoyer au LLM (utilisée par le retry manager).
+        """
         try:
             target_url, headers, payload, ssl_verify = self._prepare_request(chat_history, stream, llm_id)
             
@@ -162,7 +281,7 @@ class LlmApiService(BaseService):
                 raise LlmApiServiceException('No model configured')
             current_config = self._llm_models[target_llm_id]
             
-            self.logger.info(f"Sending request to LLM at {target_url} (SSL verify: {ssl_verify})")
+            self.logger.info(f"Sending request to {target_llm_id} at {target_url}")
             
             if not ssl_verify:
                 import urllib3
@@ -171,13 +290,36 @@ class LlmApiService(BaseService):
             token_count = self._count_tokens_for_history(chat_history)
             self.logger.info(f"Estimated token count: {token_count}")
             
+            # Timeout adaptatif : plus court pour les premières tentatives
+            timeout = min(current_config.get('timeout_seconds', 300), 30)
+            
+            # Configurer le proxy si défini
+            proxies = self._get_proxy_config(current_config)
+            
+            # Log détaillé de la requête
+            self.logger.info(f"=== Début de requête LLM ===")
+            self.logger.info(f"Endpoint: {llm_id}")
+            self.logger.info(f"URL cible: {target_url}")
+            self.logger.info(f"Modèle: {current_config.get('model')}")
+            self.logger.info(f"SSL verify: {ssl_verify}")
+            self.logger.info(f"Timeout: {timeout}s")
+            self.logger.info(f"Utilisation proxy: {'Oui' if proxies else 'Non'}")
+            if proxies:
+                self.logger.info(f"Détails proxy: {proxies}")
+            self.logger.debug(f"Headers: {headers}")
+            self.logger.debug(f"Payload keys: {payload.keys() if payload else 'None'}")
+            
             response = self.session.post(
                 target_url,
                 headers=headers,
                 json=payload,
                 verify=ssl_verify,
-                timeout=current_config.get('timeout_seconds', 300)
+                timeout=timeout,
+                proxies=proxies
             )
+            
+            self.logger.info(f"Réponse reçue: Status {response.status_code}")
+            self.logger.debug(f"Headers de réponse: {response.headers}")
             
             # Gérer les erreurs HTTP
             if response.status_code == 429:
@@ -205,11 +347,44 @@ class LlmApiService(BaseService):
                     
         except RateLimitException:
             raise  # Re-raise pour que l'appelant puisse gérer
+        except requests.exceptions.ProxyError as e:
+            self.logger.error(f"=== ERREUR PROXY ===")
+            self.logger.error(f"Erreur de proxy pour {llm_id}: {e}")
+            self.logger.error(f"Configuration proxy utilisée: {proxies if 'proxies' in locals() else 'Non défini'}")
+            self.logger.error(f"URL tentée: {target_url if 'target_url' in locals() else 'Non défini'}")
+            self._notify_error(f"Erreur de proxy sur {llm_id}: {str(e)}", -1, 0)
+            raise NetworkException(f"Erreur de proxy: {str(e)}")
+        except requests.exceptions.SSLError as e:
+            self.logger.error(f"=== ERREUR SSL ===")
+            self.logger.error(f"Erreur SSL pour {llm_id}: {e}")
+            self.logger.error(f"SSL verify était: {ssl_verify if 'ssl_verify' in locals() else 'Non défini'}")
+            self._notify_error(f"Erreur SSL sur {llm_id}", -1, 0)
+            raise NetworkException(f"Erreur SSL: {str(e)}")
+        except requests.exceptions.Timeout as e:
+            self.logger.error(f"=== TIMEOUT ===")
+            self.logger.error(f"Timeout calling LLM {llm_id}: {e}")
+            self.logger.error(f"Timeout configuré: {timeout if 'timeout' in locals() else 'Non défini'}s")
+            # Notifier l'erreur de timeout
+            self._notify_error(f"Timeout après {timeout if 'timeout' in locals() else '?'}s sur {llm_id}", -1, 0)
+            raise NetworkException(f"Timeout après {timeout if 'timeout' in locals() else '?'} secondes")
+        except requests.exceptions.ConnectionError as e:
+            self.logger.error(f"=== ERREUR DE CONNEXION ===")
+            self.logger.error(f"Connection error calling LLM {llm_id}: {e}")
+            self.logger.error(f"URL: {target_url if 'target_url' in locals() else 'Non défini'}")
+            self.logger.error(f"Proxy: {proxies if 'proxies' in locals() else 'Aucun'}")
+            self._notify_error(f"Erreur de connexion sur {llm_id}", -1, 0)
+            raise NetworkException(f"Erreur de connexion: {str(e)}")
         except requests.exceptions.RequestException as e:
-            self.logger.error(f"Network error calling LLM: {e}")
+            self.logger.error(f"=== ERREUR RÉSEAU GÉNÉRALE ===")
+            self.logger.error(f"Network error calling LLM {llm_id}: {e}")
+            self.logger.error(f"Type d'erreur: {type(e).__name__}")
             raise NetworkException(f"Network error: {str(e)}")
         except Exception as e:
-            self.logger.error(f"Error calling LLM: {e}")
+            self.logger.error(f"=== ERREUR INATTENDUE ===")
+            self.logger.error(f"Error calling LLM {llm_id}: {e}")
+            self.logger.error(f"Type d'erreur: {type(e).__name__}")
+            import traceback
+            self.logger.error(f"Stack trace: {traceback.format_exc()}")
             raise LlmApiServiceException(f"Error calling LLM: {str(e)}")
     
     def send_to_llm_stream(self, chat_history: List[Dict[str, str]], 
@@ -232,6 +407,51 @@ class LlmApiService(BaseService):
         Returns:
             Dict contenant le statut ou une erreur
         """
+        # Si on a un retry manager et plusieurs endpoints, l'utiliser
+        if self.retry_manager and len(self._llm_models) > 1:
+            def execute_stream(endpoint_id: str) -> Dict[str, Any]:
+                return self._send_to_llm_stream_internal(
+                    chat_history, on_start, on_chunk, on_end, None, endpoint_id
+                )
+            
+            def on_retry(attempt: int, endpoint: str, wait_time: float):
+                msg = f"Tentative {attempt}: Échec sur {endpoint}. Nouvelle tentative dans {wait_time:.1f}s..."
+                self._notify_error(msg, attempt, wait_time)
+                if on_error:
+                    on_error(msg)
+            
+            def on_endpoint_switch(new_endpoint: str):
+                model_name = self._llm_models[new_endpoint].get('name', new_endpoint)
+                msg = f"Basculement vers le modèle: {model_name}"
+                self._notify_error(msg, 0, 0)
+            
+            try:
+                return self.retry_manager.execute_with_retry(
+                    execute_stream,
+                    on_retry=on_retry,
+                    on_endpoint_switch=on_endpoint_switch
+                )
+            except Exception as e:
+                health_status = self.retry_manager.get_health_status()
+                self.logger.error(f"Tous les endpoints ont échoué en streaming. Statut: {health_status}")
+                if on_error:
+                    on_error(f"Erreur critique: Tous les serveurs LLM sont indisponibles")
+                raise LlmApiServiceException(f"Tous les endpoints LLM ont échoué: {str(e)}")
+        else:
+            # Pas de retry manager, utiliser l'ancienne méthode
+            return self._send_to_llm_stream_internal(
+                chat_history, on_start, on_chunk, on_end, on_error, llm_id
+            )
+    
+    def _send_to_llm_stream_internal(self, chat_history: List[Dict[str, str]], 
+                                    on_start: Optional[Callable[[], None]] = None,
+                                    on_chunk: Optional[Callable[[str], None]] = None,
+                                    on_end: Optional[Callable[[int], None]] = None,
+                                    on_error: Optional[Callable[[str], None]] = None,
+                                    llm_id: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Méthode interne pour le streaming (utilisée par le retry manager).
+        """
         try:
             target_url, headers, payload, ssl_verify = self._prepare_request(chat_history, stream=True, llm_id=llm_id)
             
@@ -241,7 +461,7 @@ class LlmApiService(BaseService):
                 raise LlmApiServiceException('No model configured')
             current_config = self._llm_models[target_llm_id]
             
-            self.logger.info(f"Sending streaming request to LLM at {target_url}")
+            self.logger.info(f"Sending streaming request to {target_llm_id} at {target_url}")
             
             if not ssl_verify:
                 import urllib3
@@ -250,14 +470,32 @@ class LlmApiService(BaseService):
             token_count = self._count_tokens_for_history(chat_history)
             self.logger.info(f"Estimated token count: {token_count}")
             
+            # Timeout adaptatif : plus court pour les premières tentatives
+            timeout = min(current_config.get('timeout_seconds', 300), 30)
+            
+            # Configurer le proxy si défini
+            proxies = self._get_proxy_config(current_config)
+            
+            # Log détaillé pour le streaming
+            self.logger.info(f"=== Début de streaming LLM ===")
+            self.logger.info(f"Endpoint: {llm_id}")
+            self.logger.info(f"URL cible: {target_url}")
+            self.logger.info(f"Mode streaming: Oui")
+            self.logger.info(f"Utilisation proxy: {'Oui' if proxies else 'Non'}")
+            if proxies:
+                self.logger.info(f"Détails proxy: {proxies}")
+            
             response = self.session.post(
                 target_url,
                 headers=headers,
                 json=payload,
                 verify=ssl_verify,
                 stream=True,
-                timeout=current_config.get('timeout_seconds', 300)
+                timeout=timeout,
+                proxies=proxies
             )
+            
+            self.logger.info(f"Streaming réponse reçue: Status {response.status_code}")
             
             # Gérer les erreurs HTTP
             if response.status_code == 429:
@@ -325,14 +563,57 @@ class LlmApiService(BaseService):
             
         except RateLimitException:
             raise
+        except requests.exceptions.ProxyError as e:
+            self.logger.error(f"=== ERREUR PROXY (STREAMING) ===")
+            self.logger.error(f"Erreur de proxy pendant streaming {llm_id}: {e}")
+            self.logger.error(f"Configuration proxy: {proxies if 'proxies' in locals() else 'Non défini'}")
+            error_msg = f"Erreur de proxy sur {llm_id}: {str(e)}"
+            if on_error:
+                on_error(error_msg)
+            self._notify_error(error_msg, -1, 0)
+            raise NetworkException(error_msg)
+        except requests.exceptions.SSLError as e:
+            self.logger.error(f"=== ERREUR SSL (STREAMING) ===")
+            self.logger.error(f"Erreur SSL pendant streaming {llm_id}: {e}")
+            error_msg = f"Erreur SSL sur {llm_id}: {str(e)}"
+            if on_error:
+                on_error(error_msg)
+            self._notify_error(error_msg, -1, 0)
+            raise NetworkException(error_msg)
+        except requests.exceptions.Timeout as e:
+            self.logger.error(f"=== TIMEOUT (STREAMING) ===")
+            self.logger.error(f"Timeout during streaming with {llm_id}: {e}")
+            self.logger.error(f"Timeout était: {timeout if 'timeout' in locals() else '?'}s")
+            error_msg = f"Timeout après {timeout if 'timeout' in locals() else '?'} secondes sur {llm_id}"
+            # Notifier via callback et notification globale
+            if on_error:
+                on_error(error_msg)
+            self._notify_error(error_msg, -1, 0)
+            raise NetworkException(error_msg)
+        except requests.exceptions.ConnectionError as e:
+            self.logger.error(f"=== ERREUR DE CONNEXION (STREAMING) ===")
+            self.logger.error(f"Connection error during streaming with {llm_id}: {e}")
+            self.logger.error(f"URL: {target_url if 'target_url' in locals() else '?'}")
+            self.logger.error(f"Proxy: {proxies if 'proxies' in locals() else 'Aucun'}")
+            error_msg = f"Erreur de connexion sur {llm_id}: {str(e)}"
+            if on_error:
+                on_error(error_msg)
+            self._notify_error(error_msg, -1, 0)
+            raise NetworkException(error_msg)
         except requests.exceptions.RequestException as e:
-            self.logger.error(f"Network error during streaming: {e}")
+            self.logger.error(f"=== ERREUR RÉSEAU (STREAMING) ===")
+            self.logger.error(f"Network error during streaming with {llm_id}: {e}")
+            self.logger.error(f"Type: {type(e).__name__}")
             # Appeler le callback d'erreur
             if on_error:
                 on_error(str(e))
             raise NetworkException(f"Network error during streaming: {str(e)}")
         except Exception as e:
-            self.logger.error(f"Error during streaming: {e}")
+            self.logger.error(f"=== ERREUR INATTENDUE (STREAMING) ===")
+            self.logger.error(f"Error during streaming with {llm_id}: {e}")
+            self.logger.error(f"Type: {type(e).__name__}")
+            import traceback
+            self.logger.error(f"Stack trace: {traceback.format_exc()}")
             # Appeler le callback d'erreur
             if on_error:
                 on_error(str(e))
@@ -501,7 +782,11 @@ class LlmApiService(BaseService):
                         'max_length': self._safe_getint(config, 'TitleGeneratorLLM', 'max_title_length', 100),
                         'temperature': config.getfloat('TitleGeneratorLLM', 'temperature', fallback=None),
                         'max_tokens': self._safe_getint(config, 'TitleGeneratorLLM', 'max_tokens', None),
-                        'ssl_verify': config.getboolean('LLMServer', 'ssl_verify', fallback=True)
+                        'ssl_verify': config.getboolean('LLMServer', 'ssl_verify', fallback=True),
+                        # Configuration proxy
+                        'proxy_http': config.get('TitleGeneratorLLM', 'proxy_http', fallback=None),
+                        'proxy_https': config.get('TitleGeneratorLLM', 'proxy_https', fallback=None),
+                        'proxy_no_proxy': config.get('TitleGeneratorLLM', 'proxy_no_proxy', fallback=None)
                     }
                 else:
                     self.logger.info("TitleGeneratorLLM est désactivé, fallback sur LLMServer")
@@ -519,7 +804,11 @@ class LlmApiService(BaseService):
                     'max_length': 100,
                     'temperature': None,  # Pas de temperature par défaut
                     'max_tokens': None,  # Pas de max_tokens par défaut
-                    'ssl_verify': config.getboolean('LLMServer', 'ssl_verify', fallback=True)
+                    'ssl_verify': config.getboolean('LLMServer', 'ssl_verify', fallback=True),
+                    # Configuration proxy
+                    'proxy_http': config.get('LLMServer', 'proxy_http', fallback=None),
+                    'proxy_https': config.get('LLMServer', 'proxy_https', fallback=None),
+                    'proxy_no_proxy': config.get('LLMServer', 'proxy_no_proxy', fallback=None)
                 }
             
             # Aucune configuration trouvée
@@ -652,12 +941,21 @@ class LlmApiService(BaseService):
                 import urllib3
                 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
             
+            # Récupérer la config proxy depuis title_config ou fallback sur le modèle par défaut
+            proxy_config = {
+                'proxy_http': title_config.get('proxy_http'),
+                'proxy_https': title_config.get('proxy_https'),
+                'proxy_no_proxy': title_config.get('proxy_no_proxy')
+            }
+            proxies = self._get_proxy_config(proxy_config) if any(proxy_config.values()) else None
+            
             response = self.session.post(
                 target_url,
                 headers=headers,
                 json=payload,
                 verify=title_config['ssl_verify'],
-                timeout=title_config['timeout']
+                timeout=title_config['timeout'],
+                proxies=proxies
             )
             
             response.raise_for_status()

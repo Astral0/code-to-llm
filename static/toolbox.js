@@ -618,14 +618,46 @@ class ToolboxController {
         };
         
         // Lancer le streaming
-        const response = await this.provider.sendMessageStream(message, this.chatHistory, this.mainContext, callbackId);
-        
-        if (response.error) {
-            this.showError(response.error);
+        try {
+            const response = await this.provider.sendMessageStream(message, this.chatHistory, this.mainContext, callbackId);
+            
+            if (response && response.error) {
+                // Afficher l'erreur dans l'interface
+                this.showError(response.error);
+                if (streamingDiv) {
+                    streamingDiv.remove();
+                }
+                this.appendMessageToChat('system-error', `Erreur: ${response.error}`);
+                
+                // Appeler aussi le handler global pour afficher la notification
+                if (window.handleLLMError) {
+                    window.handleLLMError({
+                        type: 'llm_error',
+                        message: response.error,
+                        attempt: -1,
+                        wait_time: 0,
+                        timestamp: Date.now() / 1000
+                    });
+                }
+            }
+        } catch (error) {
+            console.error('Erreur lors de l\'envoi du message:', error);
+            this.showError(error.message || 'Erreur inconnue');
             if (streamingDiv) {
                 streamingDiv.remove();
             }
-            this.appendMessageToChat('system-error', `Erreur: ${response.error}`);
+            this.appendMessageToChat('system-error', `Erreur: ${error.message || 'Erreur inconnue'}`);
+            
+            // Appeler le handler global
+            if (window.handleLLMError) {
+                window.handleLLMError({
+                    type: 'llm_error',
+                    message: error.message || 'Erreur lors de la communication avec le serveur',
+                    attempt: -1,
+                    wait_time: 0,
+                    timestamp: Date.now() / 1000
+                });
+            }
         }
     }
     
@@ -2514,6 +2546,12 @@ window.initializeToolboxMode = function() {
 
 // Initialisation au chargement du DOM
 document.addEventListener('DOMContentLoaded', () => {
+    // Initialiser le handler d'erreurs LLM s'il n'existe pas déjà
+    if (!window.LLMErrorHandler && window.llmErrorHandler) {
+        console.log('Initialisation du handler d\'erreurs LLM');
+        // Le script llm_error_handler.js devrait déjà avoir créé l'instance
+    }
+    
     // Si le mode est déjà défini, initialiser le contrôleur
     if (window.toolboxMode) {
         toolboxController = new ToolboxController();

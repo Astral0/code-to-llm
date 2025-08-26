@@ -176,7 +176,11 @@ def load_service_configs():
                     'timeout_seconds': config.getint(section, 'timeout_seconds', fallback=300),
                     'temperature': safe_parse_config_value(config, section, 'temperature', float, None),
                     'max_tokens': safe_parse_config_value(config, section, 'max_tokens', int, None),
-                    'default': is_default
+                    'default': is_default,
+                    # Configuration proxy
+                    'proxy_http': config.get(section, 'proxy_http', fallback=None),
+                    'proxy_https': config.get(section, 'proxy_https', fallback=None),
+                    'proxy_no_proxy': config.get(section, 'proxy_no_proxy', fallback=None)
                 }
                 if is_default:
                     default_llm_id = llm_id
@@ -196,7 +200,11 @@ def load_service_configs():
                     'timeout_seconds': config.getint('LLMServer', 'timeout_seconds', fallback=300),
                     'temperature': safe_parse_config_value(config, 'LLMServer', 'temperature', float, None),
                     'max_tokens': safe_parse_config_value(config, 'LLMServer', 'max_tokens', int, None),
-                    'default': True
+                    'default': True,
+                    # Configuration proxy
+                    'proxy_http': config.get('LLMServer', 'proxy_http', fallback=None),
+                    'proxy_https': config.get('LLMServer', 'proxy_https', fallback=None),
+                    'proxy_no_proxy': config.get('LLMServer', 'proxy_no_proxy', fallback=None)
                 }
                 default_llm_id = 'Default'
         
@@ -243,6 +251,9 @@ class Api:
         self.current_directory = None
         self.file_cache = []
         self.export_service = ExportService()
+        
+        # Enregistrer un callback pour les erreurs LLM
+        self.llm_service.register_error_callback(self._handle_llm_error)
     
     def set_main_window(self, window):
         """Définit la référence à la fenêtre principale"""
@@ -799,6 +810,40 @@ class Api:
         """Retourne la liste des LLMs configurés."""
         return self.llm_service.get_available_models()
     
+    def get_llm_health_status(self):
+        """Retourne le statut de santé des endpoints LLM."""
+        return self.llm_service.get_endpoints_health()
+    
+    def reset_llm_endpoint(self, endpoint_id: str):
+        """Réinitialise le statut d'un endpoint LLM."""
+        self.llm_service.reset_endpoint_health(endpoint_id)
+        return {'success': True, 'message': f'Endpoint {endpoint_id} réinitialisé'}
+    
+    def _handle_llm_error(self, message: str, attempt: int, wait_time: float):
+        """Gère les notifications d'erreur du service LLM."""
+        try:
+            # Envoyer la notification à l'interface Toolbox si elle est ouverte
+            if self._toolbox_window:
+                error_data = {
+                    'type': 'llm_error',
+                    'message': message,
+                    'attempt': attempt,
+                    'wait_time': wait_time,
+                    'timestamp': time.time()
+                }
+                
+                # Envoyer via JavaScript
+                js_code = f"""
+                if (window.handleLLMError) {{
+                    window.handleLLMError({json.dumps(error_data)});
+                }}
+                """
+                self._toolbox_window.evaluate_js(js_code)
+                
+            logging.warning(f"LLM Error: {message}")
+        except Exception as e:
+            logging.error(f"Erreur lors de la notification d'erreur LLM: {e}")
+    
     def send_to_llm_stream(self, chat_history, callback_id, llm_id=None):
         """Envoie l'historique au LLM en mode streaming avec callback vers le frontend"""
         logging.info(f"send_to_llm_stream appelé avec callback_id: {callback_id}, llm_id: {llm_id}")
@@ -820,12 +865,24 @@ class Api:
                 self._toolbox_window.evaluate_js(f'window.onStreamEnd && window.onStreamEnd("{callback_id}", {total_tokens})')
         
         def on_error(error_msg):
+            logging.error(f"Erreur LLM pour {callback_id}: {error_msg}")
             if self._toolbox_window:
                 escaped_error = error_msg.replace('\\', '\\\\').replace('"', '\\"')
+                # Envoyer l'erreur au handler spécifique du streaming
                 self._toolbox_window.evaluate_js(f'window.onStreamError && window.onStreamError("{callback_id}", "{escaped_error}")')
+                # Envoyer aussi au handler global d'erreurs LLM pour afficher la notification
+                error_data = {
+                    'type': 'llm_error',
+                    'message': str(error_msg),
+                    'attempt': -1,  # -1 pour indiquer une erreur finale
+                    'wait_time': 0,
+                    'timestamp': time.time()
+                }
+                js_code = f'window.handleLLMError && window.handleLLMError({json.dumps(error_data)})'
+                self._toolbox_window.evaluate_js(js_code)
         
         try:
-            return self.llm_service.send_to_llm_stream(
+            result = self.llm_service.send_to_llm_stream(
                 chat_history, 
                 on_start=on_start,
                 on_chunk=on_chunk,
@@ -833,18 +890,47 @@ class Api:
                 on_error=on_error,
                 llm_id=llm_id
             )
+            # Si on a un résultat avec erreur, la traiter aussi
+            if result and 'error' in result:
+                on_error(result['error'])
+            return result
         except Exception as e:
-            logging.error(f"Erreur lors de l'appel au LLM en streaming: {str(e)}")
-            on_error(str(e))
-            return {'error': str(e)}
+            error_msg = f"Erreur lors de l'appel au LLM: {str(e)}"
+            logging.error(error_msg)
+            on_error(error_msg)
+            return {'error': error_msg}
     
     def send_to_llm(self, chat_history, stream=False, llm_id=None):
         """Envoie l'historique du chat au LLM et retourne la réponse"""
         try:
-            return self.llm_service.send_to_llm(chat_history, stream, llm_id)
+            result = self.llm_service.send_to_llm(chat_history, stream, llm_id)
+            # Si on a un résultat avec erreur, notifier aussi via le handler global
+            if result and 'error' in result and self._toolbox_window:
+                error_data = {
+                    'type': 'llm_error',
+                    'message': result['error'],
+                    'attempt': -1,
+                    'wait_time': 0,
+                    'timestamp': time.time()
+                }
+                js_code = f'window.handleLLMError && window.handleLLMError({json.dumps(error_data)})'
+                self._toolbox_window.evaluate_js(js_code)
+            return result
         except Exception as e:
-            logging.error(f"Erreur lors de l'appel au LLM: {str(e)}")
-            return {'error': str(e)}
+            error_msg = f"Erreur lors de l'appel au LLM: {str(e)}"
+            logging.error(error_msg)
+            # Notifier via le handler global si la fenêtre est disponible
+            if self._toolbox_window:
+                error_data = {
+                    'type': 'llm_error',
+                    'message': error_msg,
+                    'attempt': -1,
+                    'wait_time': 0,
+                    'timestamp': time.time()
+                }
+                js_code = f'window.handleLLMError && window.handleLLMError({json.dumps(error_data)})'
+                self._toolbox_window.evaluate_js(js_code)
+            return {'error': error_msg}
     
     def generate_conversation_title(self, chat_history, main_context=None):
         """
