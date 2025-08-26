@@ -181,7 +181,25 @@ def load_config():
                 FILE_EXCLUSION_CONFIG['file_blacklist'] = set()
                 FILE_EXCLUSION_CONFIG['pattern_blacklist'] = []
 
-            if 'LLMServer' in config:
+            # Vérifier d'abord les nouvelles sections [LLM:*]
+            llm_models_found = False
+            for section in config.sections():
+                if section.startswith('LLM:'):
+                    if config.getboolean(section, 'enabled', fallback=True):
+                        llm_models_found = True
+                        # Prendre les paramètres du premier modèle activé pour la compatibilité
+                        if not LLM_SERVER_ENABLED:
+                            LLM_SERVER_URL = config.get(section, 'url', fallback=None)
+                            LLM_SERVER_APIKEY = config.get(section, 'apikey', fallback=None)
+                            LLM_SERVER_MODEL = config.get(section, 'model', fallback=None)
+                            LLM_SERVER_ENABLED = True
+                            LLM_SERVER_API_TYPE = config.get(section, 'api_type', fallback='openai').lower()
+                            LLM_SERVER_STREAM_RESPONSE = config.getboolean(section, 'stream_response', fallback=False)
+                            app.logger.info(f"Modèles LLM détectés. Configuration multi-modèles activée.")
+                        break
+            
+            # Fallback sur l'ancienne configuration [LLMServer] si aucun modèle trouvé
+            if not llm_models_found and 'LLMServer' in config:
                 LLM_SERVER_URL = config.get('LLMServer', 'url', fallback=None)
                 LLM_SERVER_APIKEY = config.get('LLMServer', 'apikey', fallback=None)
                 LLM_SERVER_MODEL = config.get('LLMServer', 'model', fallback=None)
@@ -192,8 +210,8 @@ def load_config():
                     app.logger.info(f"Configuration du serveur LLM chargée (Type: {LLM_SERVER_API_TYPE}, Streaming: {LLM_SERVER_STREAM_RESPONSE}).")
                 else:
                     app.logger.info("Fonctionnalité LLM désactivée dans config.ini.")
-            else:
-                app.logger.info("Section [LLMServer] non trouvée dans config.ini. Fonctionnalité LLM désactivée.")
+            elif not llm_models_found:
+                app.logger.info("Aucun modèle LLM configuré. Fonctionnalité LLM désactivée.")
             
             if 'SummarizerLLM' in config:
                 SUMMARIZER_LLM_ENABLED = config.getboolean('SummarizerLLM', 'enabled', fallback=False)

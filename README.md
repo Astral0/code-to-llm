@@ -44,33 +44,41 @@ Une application de bureau complète pour préparer, analyser et interagir avec v
     pip install -r requirements.txt
     ```
 3.  **Configuration Essentielle** :
-    Copiez `config.ini.template` vers `config.ini` et configurez-le. Pour utiliser la Toolbox, la section `[LLMServer]` est requise :
+    Copiez `config.ini.template` vers `config.ini` et configurez-le. L'application supporte maintenant **plusieurs modèles LLM indépendants** que vous pouvez sélectionner directement depuis l'interface :
+    
     ```ini
-    [LLMServer]
-    # URL de l'API de votre LLM.
-    # Ex: https://api.openai.com/v1 ou http://localhost:11434 pour Ollama
-    url = YOUR_LLM_API_URL_HERE
+    # Chaque section [LLM:nom] définit un modèle indépendant
+    # Le nom après "LLM:" apparaîtra dans le sélecteur de l'interface
     
-    # Votre clé API (requise pour OpenAI, non nécessaire pour Ollama local)
-    apikey = YOUR_LLM_API_KEY_HERE
-    
-    # Modèle à utiliser
-    # Ex: gpt-4-turbo-preview, gpt-3.5-turbo, llama3, codellama
-    model = YOUR_LLM_MODEL_HERE
-    
-    # Type d'API : 'openai' ou 'ollama'
+    [LLM:GPT-4o]
+    url = https://api.openai.com/v1
+    apikey = YOUR_OPENAI_API_KEY_HERE
+    model = gpt-4o
     api_type = openai
-    
-    # Activer l'intégration LLM dans la Toolbox
-    enabled = true
-    
-    # Activer le streaming des réponses pour le chat
+    enabled = true  # Mettre à true pour activer ce modèle
     stream_response = true
+    ssl_verify = true
+    timeout_seconds = 300
+    temperature = 0.7
+    max_tokens = 4096
+    default = true  # Ce modèle sera sélectionné par défaut
     
-    # Paramètres optionnels pour contrôler la génération (décommentez si nécessaire)
-    # temperature = 0.7  # Contrôle la créativité (0.0 = déterministe, 1.0 = très créatif)
-    # max_tokens = 4096  # Nombre maximum de tokens pour la réponse
+    [LLM:Ollama Local]
+    url = http://localhost:11434
+    apikey =  # Pas de clé API pour Ollama local
+    model = llama3:70b
+    api_type = ollama
+    enabled = true
+    stream_response = false
+    ssl_verify = false
+    timeout_seconds = 600
     ```
+    
+    **Nouvelles fonctionnalités :**
+    - **Multi-modèles** : Configurez autant de modèles que nécessaire
+    - **Sélecteur dans l'interface** : Changez de modèle à la volée sans redémarrer
+    - **Configuration indépendante** : Chaque modèle a ses propres paramètres
+    - **Persistance du choix** : Le modèle sélectionné est mémorisé entre les sessions
 4.  Lancez l'application en double-cliquant sur **`run.bat`**.
 
 ## 🚀 Guide d'Utilisation

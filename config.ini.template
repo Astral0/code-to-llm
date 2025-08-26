@@ -6,18 +6,70 @@ debug = false
 instruction1_text = Ne fais rien, attends mes instructions.
 instruction2_text = Si des modifications du code source est nécessaire, tu dois présenter ta réponse sous la forme d'un fichier patch Linux. Considère que le fichier patch a été lancé depuis le répertoire du code-to-llm.
 
-[LLMServer]
-url = YOUR_LLM_API_URL_HERE
-apikey = YOUR_LLM_API_KEY_HERE
-model = YOUR_LLM_MODEL_HERE
-api_type = openai # Can be 'openai' or 'ollama'
+# Configuration multi-modèles LLM
+# Chaque section [LLM:nom] définit un modèle complètement indépendant
+# Le nom après "LLM:" sera affiché dans le sélecteur de l'interface
+
+[LLM:GPT-4o]
+url = https://api.openai.com/v1
+apikey = YOUR_OPENAI_API_KEY_HERE
+model = gpt-4o
+api_type = openai
 enabled = false
 stream_response = true
-ssl_verify = true # Set to false to disable SSL certificate verification (use with caution)
-timeout_seconds = 300 # Timeout in seconds for LLM API requests (default: 300)
-# Paramètres optionnels pour contrôler la génération
-# temperature = 0.7  # Contrôle la créativité (0.0 = déterministe, 1.0 = très créatif)
-# max_tokens = 4096  # Nombre maximum de tokens pour la réponse
+ssl_verify = true
+timeout_seconds = 300
+# Contrôle la créativité (0.0 = déterministe, 1.0 = très créatif)
+temperature = 0.7
+# Nombre maximum de tokens pour la réponse
+# Commentez cette ligne pour laisser le modèle utiliser son maximum par défaut
+# Pour Gemini 2.0 Flash : max 8192 tokens en output
+# max_tokens = 8192
+# Ce modèle sera sélectionné par défaut au démarrage
+default = true
+
+[LLM:Claude 3.5 Sonnet]
+url = https://api.anthropic.com/v1
+apikey = YOUR_ANTHROPIC_API_KEY_HERE
+model = claude-3-5-sonnet-20241022
+# ou 'openai' si utilisation via proxy OpenAI-compatible
+api_type = anthropic
+enabled = false
+stream_response = true
+ssl_verify = true
+timeout_seconds = 300
+temperature = 0.5
+# Claude peut générer jusqu'à 8192 tokens
+# max_tokens = 8192
+default = false
+
+[LLM:Ollama Local]
+url = http://localhost:11434
+# Pas de clé API pour Ollama local
+apikey =
+model = llama3:70b
+api_type = ollama
+enabled = false
+# Peut être désactivé pour certains modèles
+stream_response = false
+# Pas de SSL pour une connexion locale
+ssl_verify = false
+# Timeout plus long pour les modèles locaux
+timeout_seconds = 600
+temperature = 0.8
+# Laissez commenté pour utiliser le maximum du modèle
+# max_tokens = 4096
+
+# Ancienne configuration (conservée pour compatibilité, sera ignorée si des sections [LLM:*] existent)
+# [LLMServer]
+# url = YOUR_LLM_API_URL_HERE
+# apikey = YOUR_LLM_API_KEY_HERE
+# model = YOUR_LLM_MODEL_HERE
+# api_type = openai
+# enabled = false
+# stream_response = true
+# ssl_verify = true
+# timeout_seconds = 300
 
 [SummarizerLLM]
 # LLM pour le RESUME du code (compression "lossy")

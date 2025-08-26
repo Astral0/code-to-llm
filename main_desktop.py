@@ -150,29 +150,60 @@ def load_service_configs():
         if 'Git' in config:
             service_configs['git_service']['executable_path'] = config.get('Git', 'executable_path', fallback='git')
         
-        # Configuration LLM
-        if 'LLMServer' in config:
-            llm_config = {
-                'enabled': config.getboolean('LLMServer', 'enabled', fallback=False),
-                'url': config.get('LLMServer', 'url', fallback=''),
-                'apikey': config.get('LLMServer', 'apikey', fallback=''),
-                'model': config.get('LLMServer', 'model', fallback=''),
-                'api_type': config.get('LLMServer', 'api_type', fallback='openai').lower(),
-                'ssl_verify': config.getboolean('LLMServer', 'ssl_verify', fallback=True),
-                'stream_response': config.getboolean('LLMServer', 'stream_response', fallback=False),
-                'timeout_seconds': config.getint('LLMServer', 'timeout_seconds', fallback=300)
-            }
-            
-            # Ajouter les paramètres optionnels s'ils existent
-            temp = safe_parse_config_value(config, 'LLMServer', 'temperature', float, None)
-            if temp is not None:
-                llm_config['temperature'] = temp
+        # Configuration LLM - Nouvelle logique multi-modèles
+        llm_models = {}
+        default_llm_id = None
+        
+        # D'abord, chercher les nouvelles sections [LLM:...]
+        for section in config.sections():
+            if section.startswith('LLM:'):
+                # Ignorer les modèles désactivés
+                if not config.getboolean(section, 'enabled', fallback=True):
+                    continue
                 
-            max_tokens = safe_parse_config_value(config, 'LLMServer', 'max_tokens', int, None)
-            if max_tokens is not None:
-                llm_config['max_tokens'] = max_tokens
-                    
-            service_configs['llm_service'] = llm_config
+                llm_id = section[4:].strip()
+                is_default = config.getboolean(section, 'default', fallback=False)
+                
+                llm_models[llm_id] = {
+                    'id': llm_id,
+                    'name': llm_id,
+                    'url': config.get(section, 'url', fallback=''),
+                    'apikey': config.get(section, 'apikey', fallback=''),
+                    'model': config.get(section, 'model', fallback=''),
+                    'api_type': config.get(section, 'api_type', fallback='openai').lower(),
+                    'stream_response': config.getboolean(section, 'stream_response', fallback=False),
+                    'ssl_verify': config.getboolean(section, 'ssl_verify', fallback=True),
+                    'timeout_seconds': config.getint(section, 'timeout_seconds', fallback=300),
+                    'temperature': safe_parse_config_value(config, section, 'temperature', float, None),
+                    'max_tokens': safe_parse_config_value(config, section, 'max_tokens', int, None),
+                    'default': is_default
+                }
+                if is_default:
+                    default_llm_id = llm_id
+        
+        # Fallback sur l'ancienne configuration [LLMServer] si aucun modèle trouvé
+        if not llm_models and 'LLMServer' in config:
+            if config.getboolean('LLMServer', 'enabled', fallback=False):
+                llm_models['Default'] = {
+                    'id': 'Default',
+                    'name': 'Default',
+                    'url': config.get('LLMServer', 'url', fallback=''),
+                    'apikey': config.get('LLMServer', 'apikey', fallback=''),
+                    'model': config.get('LLMServer', 'model', fallback=''),
+                    'api_type': config.get('LLMServer', 'api_type', fallback='openai').lower(),
+                    'stream_response': config.getboolean('LLMServer', 'stream_response', fallback=False),
+                    'ssl_verify': config.getboolean('LLMServer', 'ssl_verify', fallback=True),
+                    'timeout_seconds': config.getint('LLMServer', 'timeout_seconds', fallback=300),
+                    'temperature': safe_parse_config_value(config, 'LLMServer', 'temperature', float, None),
+                    'max_tokens': safe_parse_config_value(config, 'LLMServer', 'max_tokens', int, None),
+                    'default': True
+                }
+                default_llm_id = 'Default'
+        
+        service_configs['llm_service'] = {
+            'models': llm_models,
+            'default_id': default_llm_id
+        }
     
     return service_configs
 
@@ -764,9 +795,13 @@ class Api:
             return False
     
     
-    def send_to_llm_stream(self, chat_history, callback_id):
+    def get_available_llms(self):
+        """Retourne la liste des LLMs configurés."""
+        return self.llm_service.get_available_models()
+    
+    def send_to_llm_stream(self, chat_history, callback_id, llm_id=None):
         """Envoie l'historique au LLM en mode streaming avec callback vers le frontend"""
-        logging.info(f"send_to_llm_stream appelé avec callback_id: {callback_id}")
+        logging.info(f"send_to_llm_stream appelé avec callback_id: {callback_id}, llm_id: {llm_id}")
         
         # Créer les callbacks pour gérer l'interaction avec la fenêtre
         def on_start():
@@ -795,17 +830,18 @@ class Api:
                 on_start=on_start,
                 on_chunk=on_chunk,
                 on_end=on_end,
-                on_error=on_error
+                on_error=on_error,
+                llm_id=llm_id
             )
         except Exception as e:
             logging.error(f"Erreur lors de l'appel au LLM en streaming: {str(e)}")
             on_error(str(e))
             return {'error': str(e)}
     
-    def send_to_llm(self, chat_history, stream=False):
+    def send_to_llm(self, chat_history, stream=False, llm_id=None):
         """Envoie l'historique du chat au LLM et retourne la réponse"""
         try:
-            return self.llm_service.send_to_llm(chat_history, stream)
+            return self.llm_service.send_to_llm(chat_history, stream, llm_id)
         except Exception as e:
             logging.error(f"Erreur lors de l'appel au LLM: {str(e)}")
             return {'error': str(e)}

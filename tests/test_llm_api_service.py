@@ -11,7 +11,23 @@ class TestLlmApiService:
     @pytest.fixture
     def llm_service(self):
         """Fixture pour créer une instance de LlmApiService."""
-        config = {'debug': False}
+        config = {
+            'models': {
+                'test-model': {
+                    'id': 'test-model',
+                    'name': 'Test Model',
+                    'url': 'https://api.openai.com/v1',
+                    'apikey': 'test-api-key',
+                    'model': 'gpt-3.5-turbo',
+                    'api_type': 'openai',
+                    'stream_response': False,
+                    'ssl_verify': True,
+                    'timeout_seconds': 300,
+                    'default': True
+                }
+            },
+            'default_id': 'test-model'
+        }
         return LlmApiService(config)
     
     @pytest.fixture
@@ -40,9 +56,13 @@ class TestLlmApiService:
     
     def test_init(self):
         """Test de l'initialisation du service."""
-        config = {'debug': True}
+        config = {
+            'models': {'test': {'id': 'test', 'name': 'Test'}},
+            'default_id': 'test'
+        }
         service = LlmApiService(config)
-        assert service.config == config
+        assert service._llm_models == config['models']
+        assert service._default_llm_id == 'test'
         assert hasattr(service, 'session')
     
     def test_setup_http_session(self, llm_service):
@@ -65,11 +85,8 @@ class TestLlmApiService:
         # Config par défaut du fixture
         assert config['debug'] == False
     
-    @patch('configparser.ConfigParser')
-    def test_prepare_request_openai(self, mock_config_parser, mock_config, llm_service, chat_history):
+    def test_prepare_request_openai(self, llm_service, chat_history):
         """Test de la préparation de requête pour OpenAI."""
-        mock_config_parser.return_value = mock_config
-        
         url, headers, payload, ssl_verify = llm_service._prepare_request(chat_history, stream=False)
         
         assert url == 'https://api.openai.com/v1/chat/completions'
@@ -78,20 +95,25 @@ class TestLlmApiService:
         assert payload['messages'] == chat_history
         assert payload['stream'] == False
     
-    @patch('configparser.ConfigParser')
-    def test_prepare_request_ollama(self, mock_config_parser, llm_service, chat_history):
+    def test_prepare_request_ollama(self, chat_history):
         """Test de la préparation de requête pour Ollama."""
-        mock_config = MagicMock()
-        mock_config.getboolean.return_value = True
-        mock_config.get.side_effect = lambda section, key, fallback=None: {
-            ('LLMServer', 'url'): 'http://localhost:11434',
-            ('LLMServer', 'apikey'): '',
-            ('LLMServer', 'model'): 'llama2',
-            ('LLMServer', 'api_type'): 'ollama'
-        }.get((section, key), fallback)
-        mock_config_parser.return_value = mock_config
+        config = {
+            'models': {
+                'ollama-test': {
+                    'id': 'ollama-test',
+                    'name': 'Ollama Test',
+                    'url': 'http://localhost:11434',
+                    'apikey': '',
+                    'model': 'llama2',
+                    'api_type': 'ollama',
+                    'ssl_verify': False
+                }
+            },
+            'default_id': 'ollama-test'
+        }
+        service = LlmApiService(config)
         
-        url, headers, payload, ssl_verify = llm_service._prepare_request(chat_history, stream=True)
+        url, headers, payload, ssl_verify = service._prepare_request(chat_history, stream=True)
         
         assert url == 'http://localhost:11434/api/generate'
         assert 'Authorization' not in headers
@@ -99,17 +121,18 @@ class TestLlmApiService:
         assert 'prompt' in payload
         assert payload['stream'] == True
     
-    @patch('configparser.ConfigParser')
-    def test_prepare_request_disabled(self, mock_config_parser, llm_service, chat_history):
-        """Test quand LLM est désactivé."""
-        mock_config = MagicMock()
-        mock_config.getboolean.return_value = False
-        mock_config_parser.return_value = mock_config
+    def test_prepare_request_disabled(self, chat_history):
+        """Test quand aucun LLM n'est configuré."""
+        config = {
+            'models': {},
+            'default_id': None
+        }
+        service = LlmApiService(config)
         
         with pytest.raises(LlmApiServiceException) as exc_info:
-            llm_service._prepare_request(chat_history)
+            service._prepare_request(chat_history)
         
-        assert "not enabled" in str(exc_info.value)
+        assert "No default or valid LLM configured" in str(exc_info.value)
     
     @patch.object(LlmApiService, '_prepare_request')
     def test_send_to_llm_success_openai(self, mock_prepare, llm_service, chat_history):
