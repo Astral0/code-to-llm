@@ -238,14 +238,30 @@ class LlmApiService(BaseService):
         Returns:
             Dict contenant la réponse ou une erreur
         """
-        # Si on a un retry manager et plusieurs endpoints, l'utiliser
+        # Si un modèle spécifique est demandé, essayer d'abord celui-ci
+        if llm_id and llm_id in self._llm_models:
+            try:
+                self.logger.info(f"Utilisation du modèle spécifiquement sélectionné: {llm_id}")
+                return self._send_to_llm_internal(chat_history, stream, llm_id)
+            except Exception as e:
+                self.logger.warning(f"Échec du modèle sélectionné {llm_id}: {str(e)}")
+                # Si le modèle sélectionné échoue et qu'on a un retry manager, continuer avec le failover
+                if not self.retry_manager or len(self._llm_models) <= 1:
+                    raise  # Pas de failover disponible, propager l'erreur
+                
+        # Si on a un retry manager et plusieurs endpoints, l'utiliser pour le failover
         if self.retry_manager and len(self._llm_models) > 1:
             def execute_request(endpoint_id: str) -> Dict[str, Any]:
+                # Ne pas réessayer le modèle qui vient d'échouer
+                if llm_id and endpoint_id == llm_id:
+                    raise Exception(f"Modèle {endpoint_id} déjà essayé")
                 return self._send_to_llm_internal(chat_history, stream, endpoint_id)
             
             def on_retry(attempt: int, endpoint: str, wait_time: float):
-                msg = f"Tentative {attempt}: Échec sur {endpoint}. Nouvelle tentative dans {wait_time:.1f}s..."
-                self._notify_error(msg, attempt, wait_time)
+                # Ajuster le compteur de tentatives si on a déjà essayé le modèle sélectionné
+                actual_attempt = attempt + (1 if llm_id and llm_id in self._llm_models else 0)
+                msg = f"Tentative {actual_attempt}: Échec sur {endpoint}. Nouvelle tentative dans {wait_time:.1f}s..."
+                self._notify_error(msg, actual_attempt, wait_time)
             
             def on_endpoint_switch(new_endpoint: str):
                 model_name = self._llm_models[new_endpoint].get('name', new_endpoint)
@@ -407,16 +423,32 @@ class LlmApiService(BaseService):
         Returns:
             Dict contenant le statut ou une erreur
         """
-        # Si on a un retry manager et plusieurs endpoints, l'utiliser
+        # Si un modèle spécifique est demandé, essayer d'abord celui-ci
+        if llm_id and llm_id in self._llm_models:
+            try:
+                self.logger.info(f"Utilisation du modèle spécifiquement sélectionné (streaming): {llm_id}")
+                return self._send_to_llm_stream_internal(chat_history, on_start, on_chunk, on_end, on_error, llm_id)
+            except Exception as e:
+                self.logger.warning(f"Échec du modèle sélectionné {llm_id} en streaming: {str(e)}")
+                # Si le modèle sélectionné échoue et qu'on a un retry manager, continuer avec le failover
+                if not self.retry_manager or len(self._llm_models) <= 1:
+                    raise  # Pas de failover disponible, propager l'erreur
+        
+        # Si on a un retry manager et plusieurs endpoints, l'utiliser pour le failover
         if self.retry_manager and len(self._llm_models) > 1:
             def execute_stream(endpoint_id: str) -> Dict[str, Any]:
+                # Ne pas réessayer le modèle qui vient d'échouer
+                if llm_id and endpoint_id == llm_id:
+                    raise Exception(f"Modèle {endpoint_id} déjà essayé")
                 return self._send_to_llm_stream_internal(
                     chat_history, on_start, on_chunk, on_end, None, endpoint_id
                 )
             
             def on_retry(attempt: int, endpoint: str, wait_time: float):
-                msg = f"Tentative {attempt}: Échec sur {endpoint}. Nouvelle tentative dans {wait_time:.1f}s..."
-                self._notify_error(msg, attempt, wait_time)
+                # Ajuster le compteur de tentatives si on a déjà essayé le modèle sélectionné
+                actual_attempt = attempt + (1 if llm_id and llm_id in self._llm_models else 0)
+                msg = f"Tentative {actual_attempt}: Échec sur {endpoint}. Nouvelle tentative dans {wait_time:.1f}s..."
+                self._notify_error(msg, actual_attempt, wait_time)
                 if on_error:
                     on_error(msg)
             
@@ -751,7 +783,7 @@ class LlmApiService(BaseService):
     def _get_title_generation_config(self) -> Dict[str, Any]:
         """
         Récupère la configuration pour la génération de titre avec fallback.
-        Priorité : TitleGeneratorLLM > LLMServer
+        Priorité : TitleGeneratorLLM > Modèle LLM par défaut
         
         Returns:
             Dict contenant la configuration pour générer le titre
@@ -766,49 +798,56 @@ class LlmApiService(BaseService):
                 if config.getboolean('TitleGeneratorLLM', 'enabled', fallback=True):
                     self.logger.info("Utilisation de la configuration TitleGeneratorLLM")
                     
-                    # Récupérer les paramètres avec fallback sur LLMServer
+                    # Si TitleGeneratorLLM n'a pas d'URL/apikey, utiliser le modèle par défaut
+                    default_model = self._llm_models.get(self._default_llm_id, {}) if self._default_llm_id else {}
+                    
+                    # Récupérer les paramètres avec fallback sur le modèle par défaut
                     return {
                         'api_url': config.get('TitleGeneratorLLM', 'url', 
-                                            fallback=config.get('LLMServer', 'url')),
+                                            fallback=default_model.get('url', '')),
                         'api_key': config.get('TitleGeneratorLLM', 'apikey', 
-                                             fallback=config.get('LLMServer', 'apikey')),
+                                             fallback=default_model.get('apikey', '')),
                         'model': config.get('TitleGeneratorLLM', 'model', 
-                                          fallback=config.get('LLMServer', 'model')),
+                                          fallback=default_model.get('model', '')),
                         'api_type': config.get('TitleGeneratorLLM', 'api_type',
-                                             fallback=config.get('LLMServer', 'api_type', fallback='openai')),
+                                             fallback=default_model.get('api_type', 'openai')),
                         'prompt': config.get('TitleGeneratorLLM', 'title_prompt', 
                                            fallback=self.DEFAULT_TITLE_PROMPT),
                         'timeout': self._safe_getint(config, 'TitleGeneratorLLM', 'timeout_seconds', 15),
                         'max_length': self._safe_getint(config, 'TitleGeneratorLLM', 'max_title_length', 100),
                         'temperature': config.getfloat('TitleGeneratorLLM', 'temperature', fallback=None),
                         'max_tokens': self._safe_getint(config, 'TitleGeneratorLLM', 'max_tokens', None),
-                        'ssl_verify': config.getboolean('LLMServer', 'ssl_verify', fallback=True),
+                        'ssl_verify': default_model.get('ssl_verify', True),
                         # Configuration proxy
-                        'proxy_http': config.get('TitleGeneratorLLM', 'proxy_http', fallback=None),
-                        'proxy_https': config.get('TitleGeneratorLLM', 'proxy_https', fallback=None),
-                        'proxy_no_proxy': config.get('TitleGeneratorLLM', 'proxy_no_proxy', fallback=None)
+                        'proxy_http': config.get('TitleGeneratorLLM', 'proxy_http', 
+                                                fallback=default_model.get('proxy_http')),
+                        'proxy_https': config.get('TitleGeneratorLLM', 'proxy_https', 
+                                                 fallback=default_model.get('proxy_https')),
+                        'proxy_no_proxy': config.get('TitleGeneratorLLM', 'proxy_no_proxy', 
+                                                    fallback=default_model.get('proxy_no_proxy'))
                     }
                 else:
-                    self.logger.info("TitleGeneratorLLM est désactivé, fallback sur LLMServer")
+                    self.logger.info("TitleGeneratorLLM est désactivé, fallback sur le modèle par défaut")
             
-            # Fallback sur la config principale LLMServer
-            if config.has_section('LLMServer'):
-                self.logger.info("Utilisation de la configuration LLMServer pour la génération de titre")
+            # Fallback sur le modèle LLM par défaut
+            if self._default_llm_id and self._default_llm_id in self._llm_models:
+                default_model = self._llm_models[self._default_llm_id]
+                self.logger.info(f"Utilisation du modèle par défaut '{self._default_llm_id}' pour la génération de titre")
                 return {
-                    'api_url': config.get('LLMServer', 'url'),
-                    'api_key': config.get('LLMServer', 'apikey'),
-                    'model': config.get('LLMServer', 'model'),
-                    'api_type': config.get('LLMServer', 'api_type', fallback='openai'),
+                    'api_url': default_model.get('url', ''),
+                    'api_key': default_model.get('apikey', ''),
+                    'model': default_model.get('model', ''),
+                    'api_type': default_model.get('api_type', 'openai'),
                     'prompt': self.DEFAULT_TITLE_PROMPT,
                     'timeout': 15,
                     'max_length': 100,
                     'temperature': None,  # Pas de temperature par défaut
                     'max_tokens': None,  # Pas de max_tokens par défaut
-                    'ssl_verify': config.getboolean('LLMServer', 'ssl_verify', fallback=True),
+                    'ssl_verify': default_model.get('ssl_verify', True),
                     # Configuration proxy
-                    'proxy_http': config.get('LLMServer', 'proxy_http', fallback=None),
-                    'proxy_https': config.get('LLMServer', 'proxy_https', fallback=None),
-                    'proxy_no_proxy': config.get('LLMServer', 'proxy_no_proxy', fallback=None)
+                    'proxy_http': default_model.get('proxy_http'),
+                    'proxy_https': default_model.get('proxy_https'),
+                    'proxy_no_proxy': default_model.get('proxy_no_proxy')
                 }
             
             # Aucune configuration trouvée

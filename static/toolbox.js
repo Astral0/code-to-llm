@@ -325,7 +325,11 @@ class ToolboxController {
     updateSaveButtonState() {
         const saveBtn = document.getElementById('saveConversationBtn');
         if (saveBtn) {
-            if (this.chatHistory.length === 0) {
+            // En mode API uniquement
+            if (this.mode !== 'api') {
+                saveBtn.disabled = true;
+                saveBtn.title = 'Disponible en mode API uniquement';
+            } else if (this.chatHistory.length === 0) {
                 saveBtn.disabled = true;
                 saveBtn.title = 'Commencez une conversation pour pouvoir la sauvegarder';
             } else {
@@ -478,7 +482,6 @@ class ToolboxController {
         const sendBtn = document.getElementById('sendChatMessageBtn');
         const input = document.getElementById('chatMessageInput');
         
-        this.updateSaveButtonState();
         if (sendBtn) sendBtn.disabled = true;
         if (input) input.disabled = true;
         
@@ -490,6 +493,9 @@ class ToolboxController {
                 // Mode API : gérer l'historique et l'affichage
                 this.chatHistory.push({ role: 'user', content: message });
                 this.appendMessageToChat('user', message);
+                
+                // Mettre à jour l'état du bouton de sauvegarde après avoir ajouté le message
+                this.updateSaveButtonState();
                 
                 // Réinitialiser le défilement
                 if (this.smartScrollController) {
