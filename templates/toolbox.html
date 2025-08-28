@@ -425,6 +425,21 @@
                                     <select class="form-select form-select-sm" id="llmSelector" style="width: auto;" title="Choisir le modèle LLM à utiliser">
                                         <!-- Options chargées dynamiquement -->
                                     </select>
+                                    <div class="form-check ms-3">
+                                        <input class="form-check-input" type="checkbox" id="enableFailover" title="Basculer automatiquement vers un autre modèle en cas d'échec">
+                                        <label class="form-check-label small text-muted" for="enableFailover">
+                                            Failover
+                                        </label>
+                                    </div>
+                                    <div class="form-check ms-3">
+                                        <input class="form-check-input" type="checkbox" id="forceStreaming" title="Forcer le mode streaming pour éviter les timeouts" checked>
+                                        <label class="form-check-label small text-muted" for="forceStreaming">
+                                            Streaming
+                                        </label>
+                                    </div>
+                                    <button type="button" class="btn btn-sm btn-outline-secondary ms-3" id="retryLastMessageBtn" title="Relancer le dernier message avec le modèle sélectionné">
+                                        <i class="fas fa-redo"></i> Relancer
+                                    </button>
                                 </div>
                             </div>
                             

@@ -219,11 +219,15 @@ SERVICE_CONFIGS = load_service_configs()
 
 # Configurer les logs selon le paramètre debug
 if CONFIG['debug']:
-    logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+    logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
     print("Mode debug activé - logs détaillés activés")
+    # S'assurer que le logger LlmApiService hérite du niveau DEBUG
+    logging.getLogger('LlmApiService').setLevel(logging.DEBUG)
 else:
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
     print("Mode normal - logs basiques activés")
+    # S'assurer que le logger LlmApiService hérite du niveau INFO
+    logging.getLogger('LlmApiService').setLevel(logging.INFO)
 
 class Api:
     def __init__(self):
@@ -246,6 +250,9 @@ class Api:
         self.llm_service = LlmApiService(SERVICE_CONFIGS['llm_service'])
         self.file_service = FileService(SERVICE_CONFIGS['file_service'])
         self.context_builder = ContextBuilderService({})
+        
+        # Test pour vérifier que les logs du service LLM fonctionnent
+        self.llm_service.logger.info("✅ Service LLM initialisé avec succès - Les logs fonctionnent !")
         self._toolbox_window = None
         self.driver = None
         self.current_directory = None
@@ -797,12 +804,32 @@ class Api:
         return ""
     
     def get_stream_status(self):
-        """Retourne l'état du streaming LLM"""
+        """Retourne l'état du streaming pour le modèle LLM par défaut"""
         try:
+            # Récupérer l'état de streaming depuis la config du service
+            if hasattr(self, 'llm_service') and self.llm_service:
+                models = self.llm_service.get_available_models()
+                if models:
+                    # Trouver le modèle par défaut ou prendre le premier
+                    default_model = None
+                    for model in models:
+                        if model.get('default', False):
+                            default_model = model
+                            break
+                    if not default_model and models:
+                        default_model = models[0]
+                    
+                    if default_model:
+                        stream_enabled = default_model.get('stream_response', False)
+                        logging.info(f"Streaming status pour {default_model.get('name', 'unknown')}: {stream_enabled}")
+                        return stream_enabled
+            
+            # Fallback sur l'ancienne méthode
             config = configparser.ConfigParser()
             config.read('config.ini', encoding='utf-8')
             return config.getboolean('LLMServer', 'stream_response', fallback=False)
-        except:
+        except Exception as e:
+            logging.error(f"Erreur lors de la récupération du statut de streaming: {e}")
             return False
     
     
@@ -844,9 +871,14 @@ class Api:
         except Exception as e:
             logging.error(f"Erreur lors de la notification d'erreur LLM: {e}")
     
-    def send_to_llm_stream(self, chat_history, callback_id, llm_id=None):
+    def send_to_llm_stream(self, chat_history, callback_id, llm_id=None, use_failover=True):
         """Envoie l'historique au LLM en mode streaming avec callback vers le frontend"""
-        logging.info(f"send_to_llm_stream appelé avec callback_id: {callback_id}, llm_id: {llm_id}")
+        logging.info(f"\n{'='*50}")
+        logging.info(f"🚀 LANCEMENT REQUÊTE STREAMING")
+        logging.info(f"Serveur LLM sélectionné: {llm_id if llm_id else 'défaut'}")
+        logging.info(f"Failover activé: {use_failover}")
+        logging.info(f"Callback ID: {callback_id}")
+        logging.info(f"{'='*50}\n")
         
         # Créer les callbacks pour gérer l'interaction avec la fenêtre
         def on_start():
@@ -888,7 +920,8 @@ class Api:
                 on_chunk=on_chunk,
                 on_end=on_end,
                 on_error=on_error,
-                llm_id=llm_id
+                llm_id=llm_id,
+                use_failover=use_failover
             )
             # Si on a un résultat avec erreur, la traiter aussi
             if result and 'error' in result:
@@ -900,10 +933,15 @@ class Api:
             on_error(error_msg)
             return {'error': error_msg}
     
-    def send_to_llm(self, chat_history, stream=False, llm_id=None):
+    def send_to_llm(self, chat_history, stream=False, llm_id=None, use_failover=True):
         """Envoie l'historique du chat au LLM et retourne la réponse"""
+        logging.info(f"\n{'='*50}")
+        logging.info(f"🚀 LANCEMENT REQUÊTE NON-STREAMING")
+        logging.info(f"Serveur LLM sélectionné: {llm_id if llm_id else 'défaut'}")
+        logging.info(f"Failover activé: {use_failover}")
+        logging.info(f"{'='*50}\n")
         try:
-            result = self.llm_service.send_to_llm(chat_history, stream, llm_id)
+            result = self.llm_service.send_to_llm(chat_history, stream, llm_id, use_failover)
             # Si on a un résultat avec erreur, notifier aussi via le handler global
             if result and 'error' in result and self._toolbox_window:
                 error_data = {

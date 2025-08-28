@@ -61,10 +61,60 @@ class LlmApiService(BaseService):
         """Configure une session HTTP de base sans retry (géré par RetryManager)."""
         self.session = requests.Session()
         
+        # IMPORTANT: Désactiver explicitement l'utilisation des variables d'environnement proxy
+        # pour cette session si aucun proxy n'est configuré dans le modèle
+        self.session.trust_env = False
+        
         # Pas de retry automatique ici, le RetryManager s'en charge
         adapter = HTTPAdapter(max_retries=0)
         self.session.mount("http://", adapter)
         self.session.mount("https://", adapter)
+    
+    def _build_curl_command(self, url: str, headers: Dict[str, str], payload: Dict[str, Any], ssl_verify: bool, proxies: Optional[Dict[str, str]]) -> str:
+        """
+        Construit la commande curl équivalente pour débogage.
+        
+        Args:
+            url: URL de la requête
+            headers: Headers HTTP
+            payload: Payload JSON
+            ssl_verify: Vérification SSL
+            proxies: Configuration proxy
+            
+        Returns:
+            Commande curl formatée
+        """
+        cmd = f"curl -X POST '{url}'"
+        
+        # Ajouter les headers
+        for key, value in headers.items():
+            # Masquer les tokens sensibles
+            if key.lower() == 'authorization' and 'Bearer' in value:
+                masked_value = value[:20] + '...' + value[-10:] if len(value) > 30 else value
+                cmd += f" \\\n  -H '{key}: {masked_value}'"
+            else:
+                cmd += f" \\\n  -H '{key}: {value}'"
+        
+        # Ajouter le payload
+        if payload:
+            payload_str = json.dumps(payload, ensure_ascii=False)
+            # Limiter la taille du payload affiché
+            if len(payload_str) > 500:
+                payload_str = payload_str[:500] + '...'
+            cmd += f" \\\n  -d '{payload_str}'"
+        
+        # Ajouter les options SSL
+        if not ssl_verify:
+            cmd += " \\\n  -k"  # Ignorer les erreurs SSL
+        
+        # Ajouter le proxy si configuré
+        if proxies:
+            if 'https' in proxies:
+                cmd += f" \\\n  -x {proxies['https']}"
+            elif 'http' in proxies:
+                cmd += f" \\\n  -x {proxies['http']}"
+        
+        return cmd
     
     def _get_proxy_config(self, config: Dict[str, Any]) -> Optional[Dict[str, str]]:
         """Extrait la configuration proxy d'un modèle LLM.
@@ -226,7 +276,7 @@ class LlmApiService(BaseService):
             except Exception as e:
                 self.logger.warning(f"Erreur dans le callback d'erreur: {e}")
     
-    def send_to_llm(self, chat_history: List[Dict[str, str]], stream: bool = False, llm_id: Optional[str] = None) -> Dict[str, Any]:
+    def send_to_llm(self, chat_history: List[Dict[str, str]], stream: bool = False, llm_id: Optional[str] = None, use_failover: bool = True) -> Dict[str, Any]:
         """
         Envoie l'historique du chat au LLM et retourne la réponse.
         
@@ -238,6 +288,30 @@ class LlmApiService(BaseService):
         Returns:
             Dict contenant la réponse ou une erreur
         """
+        # Log immédiat du lancement
+        target_llm = llm_id if llm_id else self._default_llm_id
+        model_name = self._llm_models[target_llm].get('name', target_llm) if target_llm in self._llm_models else 'inconnu'
+        
+        # PRINT DIRECT pour être sûr que ça s'affiche
+        print(f"\n{'='*60}")
+        print(f"🚀 NOUVELLE REQUÊTE LLM - LANCEMENT IMMÉDIAT")
+        print(f"📡 Serveur cible: {target_llm} ({model_name})")
+        print(f"🔄 Failover: {'Activé' if use_failover else 'Désactivé'}")
+        print(f"📊 Mode: {'STREAMING' if stream else 'STANDARD (NON-STREAMING)'}")
+        print(f"💬 Messages dans l'historique: {len(chat_history)}")
+        if not stream:
+            print(f"⚠️  ATTENTION: Mode non-streaming, risque de timeout sur les longues réponses!")
+        print(f"{'='*60}\n")
+        
+        # Logs normaux aussi
+        self.logger.info(f"\n{'='*60}")
+        self.logger.info(f"🚀 NOUVELLE REQUÊTE LLM - LANCEMENT IMMÉDIAT")
+        self.logger.info(f"📡 Serveur cible: {target_llm} ({model_name})")
+        self.logger.info(f"🔄 Failover: {'Activé' if use_failover else 'Désactivé'}")
+        self.logger.info(f"📊 Mode: {'Streaming' if stream else 'Standard'}")
+        self.logger.info(f"💬 Messages dans l'historique: {len(chat_history)}")
+        self.logger.info(f"{'='*60}\n")
+        
         # Si un modèle spécifique est demandé, essayer d'abord celui-ci
         if llm_id and llm_id in self._llm_models:
             try:
@@ -245,12 +319,13 @@ class LlmApiService(BaseService):
                 return self._send_to_llm_internal(chat_history, stream, llm_id)
             except Exception as e:
                 self.logger.warning(f"Échec du modèle sélectionné {llm_id}: {str(e)}")
-                # Si le modèle sélectionné échoue et qu'on a un retry manager, continuer avec le failover
-                if not self.retry_manager or len(self._llm_models) <= 1:
-                    raise  # Pas de failover disponible, propager l'erreur
+                # Si failover désactivé ou pas de failover disponible, propager l'erreur
+                if not use_failover or not self.retry_manager or len(self._llm_models) <= 1:
+                    self.logger.info(f"Failover désactivé (use_failover={use_failover}) ou non disponible")
+                    raise  # Pas de failover, propager l'erreur
                 
-        # Si on a un retry manager et plusieurs endpoints, l'utiliser pour le failover
-        if self.retry_manager and len(self._llm_models) > 1:
+        # Si on a un retry manager et plusieurs endpoints ET que le failover est activé
+        if use_failover and self.retry_manager and len(self._llm_models) > 1:
             def execute_request(endpoint_id: str) -> Dict[str, Any]:
                 # Ne pas réessayer le modèle qui vient d'échouer
                 if llm_id and endpoint_id == llm_id:
@@ -297,33 +372,54 @@ class LlmApiService(BaseService):
                 raise LlmApiServiceException('No model configured')
             current_config = self._llm_models[target_llm_id]
             
-            self.logger.info(f"Sending request to {target_llm_id} at {target_url}")
-            
             if not ssl_verify:
                 import urllib3
                 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
             
             token_count = self._count_tokens_for_history(chat_history)
-            self.logger.info(f"Estimated token count: {token_count}")
+            self.logger.debug(f"Estimated token count: {token_count}")
             
             # Timeout adaptatif : plus court pour les premières tentatives
             timeout = current_config.get('timeout_seconds', 300)
             
             # Configurer le proxy si défini
-            proxies = self._get_proxy_config(current_config)
+            # IMPORTANT: Si pas de proxy configuré, on met None (pas {}) pour ignorer les variables d'environnement
+            proxy_config = self._get_proxy_config(current_config)
+            proxies = proxy_config if proxy_config else None
             
-            # Log détaillé de la requête
-            self.logger.info(f"=== Début de requête LLM ===")
-            self.logger.info(f"Endpoint: {llm_id}")
-            self.logger.info(f"URL cible: {target_url}")
-            self.logger.info(f"Modèle: {current_config.get('model')}")
-            self.logger.info(f"SSL verify: {ssl_verify}")
-            self.logger.info(f"Timeout: {timeout}s")
-            self.logger.info(f"Utilisation proxy: {'Oui' if proxies else 'Non'}")
+            # Log détaillé de la requête (plus concis)
+            self.logger.info(f"Requête LLM: {llm_id} -> {current_config.get('model')} (timeout={timeout}s, proxy={'Oui' if proxies else 'Non'})")
+            self.logger.debug(f"URL cible: {target_url}")
+            self.logger.debug(f"SSL verify: {ssl_verify}")
             if proxies:
-                self.logger.info(f"Détails proxy: {proxies}")
+                self.logger.debug(f"Détails proxy: {proxies}")
             self.logger.debug(f"Headers: {headers}")
-            self.logger.debug(f"Payload keys: {payload.keys() if payload else 'None'}")
+            # Tronquer le payload pour éviter de polluer les logs
+            if payload:
+                payload_str = json.dumps(payload, ensure_ascii=False)
+                if len(payload_str) > 500:
+                    self.logger.debug(f"Payload (tronqué): {payload_str[:500]}...")
+                    self.logger.debug(f"Taille totale du payload: {len(payload_str)} caractères")
+                else:
+                    self.logger.debug(f"Payload: {payload_str}")
+            else:
+                self.logger.debug("Payload: None")
+            self.logger.debug(f"=== COMMANDE CURL ÉQUIVALENTE ===")
+            curl_cmd = self._build_curl_command(target_url, headers, payload, ssl_verify, proxies)
+            self.logger.debug(f"{curl_cmd}")
+            self.logger.debug(f"===================================")
+            
+            # Gestion du proxy : forcer explicitement l'absence de proxy si non configuré
+            if proxies:
+                self.session.trust_env = True
+                self.logger.debug("trust_env activé car proxy configuré")
+                final_proxies = proxies
+            else:
+                self.session.trust_env = False
+                # IMPORTANT: Forcer explicitement l'absence de proxy avec des chaînes vides
+                # car proxies=None peut encore utiliser les variables d'environnement
+                final_proxies = {"http": "", "https": ""}
+                self.logger.debug("Proxy forcé à vide pour ignorer les variables d'environnement")
             
             response = self.session.post(
                 target_url,
@@ -331,7 +427,7 @@ class LlmApiService(BaseService):
                 json=payload,
                 verify=ssl_verify,
                 timeout=timeout,
-                proxies=proxies
+                proxies=final_proxies
             )
             
             self.logger.info(f"Réponse reçue: Status {response.status_code}")
@@ -345,14 +441,51 @@ class LlmApiService(BaseService):
                     int(retry_after)
                 )
             
+            # Vérifier le status code avant raise_for_status pour un meilleur logging
+            if response.status_code >= 500:
+                self.logger.warning(f"Erreur serveur détectée: {response.status_code}")
+            
             response.raise_for_status()
+            
+            # Log de la réponse brute pour déboguer
+            response_text = response.text
+            self.logger.info(f"Taille de la réponse: {len(response_text)} octets")
+            
+            # Ne logger le contenu que si c'est court ou en cas d'erreur
+            if len(response_text) < 500:
+                self.logger.debug(f"Réponse brute: {response_text}")
+            else:
+                self.logger.debug(f"Réponse trop longue pour être loggée ({len(response_text)} octets)")
             
             # Parser la réponse selon le type d'API
             if current_config.get('api_type') == "openai":
                 result = response.json()
+                # Ne pas logger le JSON complet pour éviter de polluer les logs
+                self.logger.debug(f"Structure de la réponse: choices={len(result.get('choices', []))} items")
+                
                 if 'choices' in result and result['choices']:
-                    return {'response': result['choices'][0]['message']['content']}
+                    choice = result['choices'][0]
+                    
+                    # Vérifier si la réponse a été tronquée
+                    finish_reason = choice.get('finish_reason')
+                    if finish_reason == 'length':
+                        self.logger.warning("⚠️ RÉPONSE TRONQUÉE: le LLM a atteint la limite de tokens!")
+                        print("⚠️ ATTENTION: La réponse du LLM a été tronquée (limite de tokens atteinte)")
+                    elif finish_reason == 'stop':
+                        self.logger.info("✅ Réponse complète reçue")
+                    else:
+                        self.logger.warning(f"finish_reason inhabituel: {finish_reason}")
+                    
+                    message_content = choice.get('message', {}).get('content', '')
+                    
+                    if not message_content:
+                        self.logger.error(f"❌ Contenu vide! Choice: {json.dumps(choice, ensure_ascii=False)}")
+                        return {'error': 'Le LLM a retourné une réponse vide'}
+                    
+                    self.logger.info(f"✅ Réponse reçue: {len(message_content)} caractères")
+                    return {'response': message_content}
                 else:
+                    self.logger.error(f"Format inattendu: {json.dumps(result, ensure_ascii=False)[:500]}")
                     return {'error': 'Unexpected response format from LLM'}
             else:  # ollama
                 result = response.json()
@@ -390,6 +523,40 @@ class LlmApiService(BaseService):
             self.logger.error(f"Proxy: {proxies if 'proxies' in locals() else 'Aucun'}")
             self._notify_error(f"Erreur de connexion sur {llm_id}", -1, 0)
             raise NetworkException(f"Erreur de connexion: {str(e)}")
+        except requests.exceptions.HTTPError as e:
+            # Traitement spécifique des erreurs HTTP
+            if hasattr(e.response, 'status_code'):
+                status_code = e.response.status_code
+                if status_code == 504:
+                    self.logger.error(f"=== ERREUR 504 GATEWAY TIMEOUT ===")
+                    self.logger.error(f"Gateway timeout pour {llm_id}: Le serveur intermédiaire n'a pas reçu de réponse dans le délai imparti")
+                    self.logger.error(f"URL: {target_url if 'target_url' in locals() else 'Non défini'}")
+                    self.logger.error(f"Timeout configuré: {timeout if 'timeout' in locals() else 'Non défini'}s")
+                    self.logger.error(f"SUGGESTIONS:")
+                    self.logger.error(f"  1. Le serveur LLM est surchargé ou indisponible")
+                    self.logger.error(f"  2. Augmentez timeout_seconds dans la configuration (actuellement: {timeout if 'timeout' in locals() else '?'}s)")
+                    self.logger.error(f"  3. Essayez un autre modèle LLM si disponible")
+                    self._notify_error(f"Gateway timeout (504) sur {llm_id} après {timeout if 'timeout' in locals() else '?'}s", -1, 0)
+                    raise NetworkException(f"Gateway timeout (504): Le serveur {llm_id} est surchargé ou indisponible")
+                elif status_code == 502:
+                    self.logger.error(f"=== ERREUR 502 BAD GATEWAY ===")
+                    self.logger.error(f"Bad gateway pour {llm_id}: Le serveur proxy a reçu une réponse invalide")
+                    self._notify_error(f"Bad gateway (502) sur {llm_id}", -1, 0)
+                    raise NetworkException(f"Bad gateway (502): Problème de communication avec {llm_id}")
+                elif status_code == 503:
+                    self.logger.error(f"=== ERREUR 503 SERVICE UNAVAILABLE ===")
+                    self.logger.error(f"Service indisponible pour {llm_id}")
+                    self._notify_error(f"Service indisponible (503) sur {llm_id}", -1, 0)
+                    raise NetworkException(f"Service indisponible (503): {llm_id} est temporairement indisponible")
+                else:
+                    self.logger.error(f"=== ERREUR HTTP {status_code} ===")
+                    self.logger.error(f"Erreur HTTP {status_code} pour {llm_id}: {e}")
+                    raise NetworkException(f"Erreur HTTP {status_code}: {str(e)}")
+            else:
+                # Erreur HTTP sans status_code
+                self.logger.error(f"=== ERREUR HTTP ===")
+                self.logger.error(f"Erreur HTTP pour {llm_id}: {e}")
+                raise NetworkException(f"Erreur HTTP: {str(e)}")
         except requests.exceptions.RequestException as e:
             self.logger.error(f"=== ERREUR RÉSEAU GÉNÉRALE ===")
             self.logger.error(f"Network error calling LLM {llm_id}: {e}")
@@ -408,7 +575,8 @@ class LlmApiService(BaseService):
                           on_chunk: Optional[Callable[[str], None]] = None,
                           on_end: Optional[Callable[[int], None]] = None,
                           on_error: Optional[Callable[[str], None]] = None,
-                          llm_id: Optional[str] = None) -> Dict[str, Any]:
+                          llm_id: Optional[str] = None,
+                          use_failover: bool = True) -> Dict[str, Any]:
         """
         Envoie l'historique au LLM en mode streaming avec callbacks.
         
@@ -423,6 +591,26 @@ class LlmApiService(BaseService):
         Returns:
             Dict contenant le statut ou une erreur
         """
+        # Log immédiat du lancement streaming
+        target_llm = llm_id if llm_id else self._default_llm_id
+        model_name = self._llm_models[target_llm].get('name', target_llm) if target_llm in self._llm_models else 'inconnu'
+        
+        # PRINT DIRECT pour être sûr que ça s'affiche
+        print(f"\n{'='*60}")
+        print(f"🚀 NOUVELLE REQUÊTE LLM STREAMING - LANCEMENT IMMÉDIAT")
+        print(f"📡 Serveur cible: {target_llm} ({model_name})")
+        print(f"🔄 Failover: {'Activé' if use_failover else 'Désactivé'}")
+        print(f"💬 Messages dans l'historique: {len(chat_history)}")
+        print(f"{'='*60}\n")
+        
+        # Logs normaux aussi
+        self.logger.info(f"\n{'='*60}")
+        self.logger.info(f"🚀 NOUVELLE REQUÊTE LLM STREAMING - LANCEMENT IMMÉDIAT")
+        self.logger.info(f"📡 Serveur cible: {target_llm} ({model_name})")
+        self.logger.info(f"🔄 Failover: {'Activé' if use_failover else 'Désactivé'}")
+        self.logger.info(f"💬 Messages dans l'historique: {len(chat_history)}")
+        self.logger.info(f"{'='*60}\n")
+        
         # Si un modèle spécifique est demandé, essayer d'abord celui-ci
         if llm_id and llm_id in self._llm_models:
             try:
@@ -430,12 +618,13 @@ class LlmApiService(BaseService):
                 return self._send_to_llm_stream_internal(chat_history, on_start, on_chunk, on_end, on_error, llm_id)
             except Exception as e:
                 self.logger.warning(f"Échec du modèle sélectionné {llm_id} en streaming: {str(e)}")
-                # Si le modèle sélectionné échoue et qu'on a un retry manager, continuer avec le failover
-                if not self.retry_manager or len(self._llm_models) <= 1:
-                    raise  # Pas de failover disponible, propager l'erreur
+                # Si failover désactivé ou pas de failover disponible, propager l'erreur
+                if not use_failover or not self.retry_manager or len(self._llm_models) <= 1:
+                    self.logger.info(f"Failover désactivé (use_failover={use_failover}) ou non disponible")
+                    raise  # Pas de failover, propager l'erreur
         
-        # Si on a un retry manager et plusieurs endpoints, l'utiliser pour le failover
-        if self.retry_manager and len(self._llm_models) > 1:
+        # Si on a un retry manager et plusieurs endpoints ET que le failover est activé
+        if use_failover and self.retry_manager and len(self._llm_models) > 1:
             def execute_stream(endpoint_id: str) -> Dict[str, Any]:
                 # Ne pas réessayer le modèle qui vient d'échouer
                 if llm_id and endpoint_id == llm_id:
@@ -493,29 +682,53 @@ class LlmApiService(BaseService):
                 raise LlmApiServiceException('No model configured')
             current_config = self._llm_models[target_llm_id]
             
-            self.logger.info(f"Sending streaming request to {target_llm_id} at {target_url}")
-            
             if not ssl_verify:
                 import urllib3
                 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
             
             token_count = self._count_tokens_for_history(chat_history)
-            self.logger.info(f"Estimated token count: {token_count}")
+            self.logger.debug(f"Estimated token count: {token_count}")
             
             # Timeout adaptatif : plus court pour les premières tentatives
             timeout = current_config.get('timeout_seconds', 300)
             
             # Configurer le proxy si défini
-            proxies = self._get_proxy_config(current_config)
+            # IMPORTANT: Si pas de proxy configuré, on met None (pas {}) pour ignorer les variables d'environnement
+            proxy_config = self._get_proxy_config(current_config)
+            proxies = proxy_config if proxy_config else None
             
-            # Log détaillé pour le streaming
-            self.logger.info(f"=== Début de streaming LLM ===")
-            self.logger.info(f"Endpoint: {llm_id}")
-            self.logger.info(f"URL cible: {target_url}")
-            self.logger.info(f"Mode streaming: Oui")
-            self.logger.info(f"Utilisation proxy: {'Oui' if proxies else 'Non'}")
+            # Log détaillé pour le streaming (plus concis)
+            self.logger.info(f"Requête LLM STREAMING: {llm_id} -> {current_config.get('model')} (timeout={timeout}s, proxy={'Oui' if proxies else 'Non'})")
+            self.logger.debug(f"URL cible: {target_url}")
             if proxies:
-                self.logger.info(f"Détails proxy: {proxies}")
+                self.logger.debug(f"Détails proxy: {proxies}")
+            self.logger.debug(f"Headers: {headers}")
+            # Tronquer le payload pour éviter de polluer les logs
+            if payload:
+                payload_str = json.dumps(payload, ensure_ascii=False)
+                if len(payload_str) > 500:
+                    self.logger.debug(f"Payload (tronqué): {payload_str[:500]}...")
+                    self.logger.debug(f"Taille totale du payload: {len(payload_str)} caractères")
+                else:
+                    self.logger.debug(f"Payload: {payload_str}")
+            else:
+                self.logger.debug("Payload: None")
+            self.logger.debug(f"=== COMMANDE CURL ÉQUIVALENTE (STREAMING) ===")
+            curl_cmd = self._build_curl_command(target_url, headers, payload, ssl_verify, proxies)
+            self.logger.debug(f"{curl_cmd}")
+            self.logger.debug(f"=========================================")
+            
+            # Gestion du proxy : forcer explicitement l'absence de proxy si non configuré
+            if proxies:
+                self.session.trust_env = True
+                self.logger.debug("trust_env activé car proxy configuré")
+                final_proxies = proxies
+            else:
+                self.session.trust_env = False
+                # IMPORTANT: Forcer explicitement l'absence de proxy avec des chaînes vides
+                # car proxies=None peut encore utiliser les variables d'environnement
+                final_proxies = {"http": "", "https": ""}
+                self.logger.debug("Proxy forcé à vide pour ignorer les variables d'environnement")
             
             response = self.session.post(
                 target_url,
@@ -524,7 +737,7 @@ class LlmApiService(BaseService):
                 verify=ssl_verify,
                 stream=True,
                 timeout=timeout,
-                proxies=proxies
+                proxies=final_proxies
             )
             
             self.logger.info(f"Streaming réponse reçue: Status {response.status_code}")
@@ -632,6 +845,44 @@ class LlmApiService(BaseService):
                 on_error(error_msg)
             self._notify_error(error_msg, -1, 0)
             raise NetworkException(error_msg)
+        except requests.exceptions.HTTPError as e:
+            # Traitement spécifique des erreurs HTTP en streaming
+            if hasattr(e.response, 'status_code'):
+                status_code = e.response.status_code
+                if status_code == 504:
+                    self.logger.error(f"=== ERREUR 504 GATEWAY TIMEOUT (STREAMING) ===")
+                    self.logger.error(f"Gateway timeout streaming pour {llm_id}")
+                    self.logger.error(f"Timeout configuré: {timeout if 'timeout' in locals() else '?'}s")
+                    error_msg = f"Gateway timeout (504) en streaming sur {llm_id}"
+                    if on_error:
+                        on_error(error_msg)
+                    self._notify_error(error_msg, -1, 0)
+                    raise NetworkException(error_msg)
+                elif status_code == 502:
+                    error_msg = f"Bad gateway (502) en streaming sur {llm_id}"
+                    self.logger.error(f"=== ERREUR 502 BAD GATEWAY (STREAMING) ===")
+                    if on_error:
+                        on_error(error_msg)
+                    self._notify_error(error_msg, -1, 0)
+                    raise NetworkException(error_msg)
+                elif status_code == 503:
+                    error_msg = f"Service indisponible (503) en streaming sur {llm_id}"
+                    self.logger.error(f"=== ERREUR 503 SERVICE UNAVAILABLE (STREAMING) ===")
+                    if on_error:
+                        on_error(error_msg)
+                    self._notify_error(error_msg, -1, 0)
+                    raise NetworkException(error_msg)
+                else:
+                    error_msg = f"Erreur HTTP {status_code} en streaming sur {llm_id}"
+                    self.logger.error(f"=== ERREUR HTTP {status_code} (STREAMING) ===")
+                    if on_error:
+                        on_error(error_msg)
+                    raise NetworkException(error_msg)
+            else:
+                error_msg = f"Erreur HTTP en streaming sur {llm_id}: {str(e)}"
+                if on_error:
+                    on_error(error_msg)
+                raise NetworkException(error_msg)
         except requests.exceptions.RequestException as e:
             self.logger.error(f"=== ERREUR RÉSEAU (STREAMING) ===")
             self.logger.error(f"Network error during streaming with {llm_id}: {e}")
@@ -986,7 +1237,7 @@ class LlmApiService(BaseService):
                 'proxy_https': title_config.get('proxy_https'),
                 'proxy_no_proxy': title_config.get('proxy_no_proxy')
             }
-            proxies = self._get_proxy_config(proxy_config) if any(proxy_config.values()) else None
+            proxies = self._get_proxy_config(proxy_config) if any(proxy_config.values()) else {}
             
             response = self.session.post(
                 target_url,

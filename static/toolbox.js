@@ -40,9 +40,13 @@ class ApiProvider {
         const llmSelector = document.getElementById('llmSelector');
         const selectedLlmId = llmSelector ? llmSelector.value : null;
         
-        // Utiliser l'API existante avec le modèle sélectionné
+        // Récupérer l'état de la case à cocher failover
+        const enableFailover = document.getElementById('enableFailover');
+        const useFailover = enableFailover ? enableFailover.checked : false;
+        
+        // Utiliser l'API existante avec le modèle sélectionné et l'option failover
         if (window.pywebview && window.pywebview.api) {
-            return await window.pywebview.api.send_to_llm(historyToSend, false, selectedLlmId);
+            return await window.pywebview.api.send_to_llm(historyToSend, false, selectedLlmId, useFailover);
         }
         return { error: 'API non disponible' };
     }
@@ -64,9 +68,13 @@ class ApiProvider {
         const llmSelector = document.getElementById('llmSelector');
         const selectedLlmId = llmSelector ? llmSelector.value : null;
         
-        // Utiliser l'API de streaming avec le modèle sélectionné
+        // Récupérer l'état de la case à cocher failover
+        const enableFailover = document.getElementById('enableFailover');
+        const useFailover = enableFailover ? enableFailover.checked : false;
+        
+        // Utiliser l'API de streaming avec le modèle sélectionné et l'option failover
         if (window.pywebview && window.pywebview.api) {
-            return await window.pywebview.api.send_to_llm_stream(historyToSend, callbackId, selectedLlmId);
+            return await window.pywebview.api.send_to_llm_stream(historyToSend, callbackId, selectedLlmId, useFailover);
         }
         return { error: 'API non disponible' };
     }
@@ -235,8 +243,15 @@ class ToolboxController {
     async checkStreamingStatus() {
         if (this.mode === 'api' && window.pywebview && window.pywebview.api) {
             try {
-                this.isStreamEnabled = await window.pywebview.api.get_stream_status();
-                console.log('Streaming activé:', this.isStreamEnabled);
+                // Vérifier d'abord la checkbox forceStreaming
+                const forceStreamingCheckbox = document.getElementById('forceStreaming');
+                if (forceStreamingCheckbox && forceStreamingCheckbox.checked) {
+                    this.isStreamEnabled = true;
+                    console.log('Streaming forcé par la checkbox');
+                } else {
+                    this.isStreamEnabled = await window.pywebview.api.get_stream_status();
+                    console.log('Streaming depuis config:', this.isStreamEnabled);
+                }
             } catch (error) {
                 console.error('Erreur lors de la récupération du statut de streaming:', error);
                 this.isStreamEnabled = false;
@@ -502,8 +517,14 @@ class ToolboxController {
                     this.smartScrollController.reset();
                 }
                 
+                // Vérifier la checkbox de streaming juste avant l'envoi
+                const forceStreamingCheckbox = document.getElementById('forceStreaming');
+                const useStreaming = (forceStreamingCheckbox && forceStreamingCheckbox.checked) || this.isStreamEnabled;
+                
+                console.log(`Envoi du message - Mode: ${useStreaming ? 'STREAMING' : 'STANDARD'}`);
+                
                 // Envoyer selon le mode (streaming ou normal)
-                if (this.isStreamEnabled) {
+                if (useStreaming) {
                     await this.sendMessageStream(message);
                 } else {
                     const response = await this.provider.sendMessage(message, this.chatHistory, this.mainContext);
@@ -2640,6 +2661,42 @@ document.addEventListener('DOMContentLoaded', () => {
         gitDiffBtn.addEventListener('click', () => {
             if (toolboxController) {
                 toolboxController.handleGitDiff();
+            }
+        });
+    }
+    
+    // Gestionnaire pour le nouveau bouton Relancer global
+    const retryLastMessageBtn = document.getElementById('retryLastMessageBtn');
+    if (retryLastMessageBtn) {
+        retryLastMessageBtn.addEventListener('click', async () => {
+            if (toolboxController && toolboxController.chatHistory.length > 0) {
+                // Trouver le dernier message utilisateur
+                let lastUserMessageIndex = -1;
+                let lastUserMessage = null;
+                
+                for (let i = toolboxController.chatHistory.length - 1; i >= 0; i--) {
+                    if (toolboxController.chatHistory[i].role === 'user') {
+                        lastUserMessageIndex = i;
+                        lastUserMessage = toolboxController.chatHistory[i].content;
+                        break;
+                    }
+                }
+                
+                if (lastUserMessage) {
+                    // Supprimer tous les messages après le dernier message utilisateur
+                    toolboxController.chatHistory = toolboxController.chatHistory.slice(0, lastUserMessageIndex);
+                    
+                    // Rafraîchir l'affichage
+                    toolboxController.refreshChatDisplay();
+                    
+                    // Message système pour indiquer le relancement
+                    toolboxController.appendMessageToChat('system', '🔄 Relancement du dernier message avec le modèle actuellement sélectionné...');
+                    
+                    // Renvoyer le message avec le serveur LLM actuellement sélectionné
+                    await toolboxController.sendMessage(lastUserMessage);
+                } else {
+                    toolboxController.showError('Aucun message utilisateur à relancer.');
+                }
             }
         });
     }
