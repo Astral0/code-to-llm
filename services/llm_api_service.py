@@ -307,7 +307,7 @@ class LlmApiService(BaseService):
             self.logger.info(f"Estimated token count: {token_count}")
             
             # Timeout adaptatif : plus court pour les premières tentatives
-            timeout = min(current_config.get('timeout_seconds', 300), 30)
+            timeout = current_config.get('timeout_seconds', 300)
             
             # Configurer le proxy si défini
             proxies = self._get_proxy_config(current_config)
@@ -503,7 +503,7 @@ class LlmApiService(BaseService):
             self.logger.info(f"Estimated token count: {token_count}")
             
             # Timeout adaptatif : plus court pour les premières tentatives
-            timeout = min(current_config.get('timeout_seconds', 300), 30)
+            timeout = current_config.get('timeout_seconds', 300)
             
             # Configurer le proxy si défini
             proxies = self._get_proxy_config(current_config)
