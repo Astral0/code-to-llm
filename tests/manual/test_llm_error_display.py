@@ -5,7 +5,6 @@ Script de test pour vérifier l'affichage des erreurs LLM dans l'interface.
 
 import sys
 import os
-import time
 import logging
 
 # Ajouter la racine du dépôt au PYTHONPATH
@@ -182,8 +181,11 @@ def test_retry_with_multiple_endpoints():
     if service.retry_manager:
         print("\nStatut de santé des endpoints:")
         health = service.get_endpoints_health()
-        for endpoint, status in health.items():
-            print(f"  - {endpoint}: {status['state']} (taux de succès: {status['success_rate']*100:.0f}%)")
+        for endpoint, status in (health or {}).items():
+            state = status.get('state', 'unknown')
+            sr = status.get('success_rate')
+            sr_txt = f"{sr*100:.0f}%" if isinstance(sr, (int, float)) else "N/A"
+            print(f"  - {endpoint}: {state} (taux de succès: {sr_txt})")
 
 if __name__ == "__main__":
     try:

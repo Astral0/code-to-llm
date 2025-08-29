@@ -25,8 +25,11 @@ def test_direct_connection(url):
     """Test une connexion directe sans proxy."""
     try:
         logger.info(f"Test de connexion directe vers {url}")
-        response = requests.get(url, timeout=5)
+        session = requests.Session()
+        session.trust_env = False  # Ignorer les proxies de l'environnement
+        response = session.get(url, timeout=5)
         logger.info(f"✅ Connexion directe réussie: {response.status_code}")
+        session.close()
         return True
     except Exception as e:
         logger.error(f"❌ Connexion directe échouée: {e}")
@@ -47,8 +50,11 @@ def test_proxy_connection(url, proxy_config):
         logger.info(f"Test de connexion via proxy vers {url}")
         logger.info(f"Configuration proxy (credentials masqués): {safe_proxies}")
         
-        response = requests.get(url, proxies=proxies, timeout=10)
+        session = requests.Session()
+        session.trust_env = False  # Ignorer les proxies de l'environnement
+        response = session.get(url, proxies=proxies, timeout=10)
         logger.info(f"✅ Connexion via proxy réussie: {response.status_code}")
+        session.close()
         return True
     except Exception as e:
         logger.error(f"❌ Connexion via proxy échouée: {e}")
@@ -77,8 +83,7 @@ def load_config():
             llm_configs.append(llm_config)
     
     # Ajouter SummarizerLLM si configuré
-    if config.has_section('SummarizerLLM'):
-        if config.getboolean('SummarizerLLM', 'enabled', fallback=False):
+    if config.has_section('SummarizerLLM') and config.getboolean('SummarizerLLM', 'enabled', fallback=False):
             llm_configs.append({
                 'name': 'SummarizerLLM',
                 'url': config.get('SummarizerLLM', 'url', fallback=''),
@@ -105,13 +110,13 @@ def test_llm_proxy_config(llm_config):
     parsed = urlparse(url)
     test_url = f"{parsed.scheme}://{parsed.netloc}"
     
-    logger.info(f"URL du LLM: {url}")
+    logger.info(f"URL du LLM: {test_url}")  # Ne pas logger l'URL complète pour éviter d'exposer des tokens
     
     # Test selon la configuration
     has_proxy = llm_config['proxy_http'] or llm_config['proxy_https']
     
     if has_proxy:
-        logger.info(f"Configuration proxy détectée:")
+        logger.info("Configuration proxy détectée:")
         if llm_config['proxy_http']:
             logger.info(f"  HTTP Proxy: {mask_credentials(llm_config['proxy_http'])}")
         if llm_config['proxy_https']:

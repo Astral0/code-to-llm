@@ -27,8 +27,11 @@ def mask_credentials(url):
     
     parts = urlsplit(url)
     if parts.username or parts.password:
-        # Reconstruire le netloc sans les credentials
-        netloc = f"{parts.hostname}:{parts.port}" if parts.port else parts.hostname or ''
+        # Reconstruire le netloc sans les credentials (support IPv6)
+        host = parts.hostname or ''
+        if ':' in host and not host.startswith('['):  # IPv6 literal
+            host = f'[{host}]'
+        netloc = f"{host}:{parts.port}" if parts.port else host
         # Reconstruire l'URL complète sans les credentials
         return urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
     
@@ -40,9 +43,11 @@ def check_no_proxy_match(hostname, no_proxy_list):
     Vérifie si un hostname correspond à une entrée dans la liste no_proxy.
     
     Suit la sémantique standard no_proxy :
+    - Wildcard "*" : matche tous les domaines
     - Correspondance exacte : "example.com" matche uniquement "example.com"
     - Correspondance de sous-domaine : "example.com" matche aussi "www.example.com"
     - Entrée avec point : ".example.com" matche les sous-domaines mais pas le domaine lui-même
+    - Les ports dans les entrées sont ignorés pour la comparaison
     
     Args:
         hostname (str): Le nom d'hôte à vérifier
@@ -58,6 +63,8 @@ def check_no_proxy_match(hostname, no_proxy_list):
         True
         >>> check_no_proxy_match("other.com", ["example.com"])
         False
+        >>> check_no_proxy_match("api.example.com", ["*"])
+        True
     """
     if not hostname or not no_proxy_list:
         return False
@@ -70,8 +77,32 @@ def check_no_proxy_match(hostname, no_proxy_list):
             
         entry = entry.lower().strip()
         
-        # Correspondance exacte ou sous-domaine
-        if hostname == entry or hostname.endswith('.' + entry.lstrip('.')):
+        # Wildcard - matche tout
+        if entry == '*':
             return True
+            
+        # Retirer schéma/identifiants/chemin si fournis par erreur
+        if '://' in entry:
+            entry = entry.split('://', 1)[1]
+        if '@' in entry:
+            entry = entry.split('@', 1)[1]
+        entry = entry.split('/', 1)[0]
+        
+        # Gérer IPv6 entre crochets et ports
+        if entry.startswith('['):
+            rb = entry.find(']')
+            entry_host = entry[1:rb] if rb != -1 else entry
+        else:
+            entry_host = entry.split(':', 1)[0]
+        
+        core = entry_host.lstrip('.')
+        if entry_host.startswith('.'):
+            # Sous-domaines uniquement (".example.com" ne matche pas "example.com")
+            if hostname.endswith('.' + core):
+                return True
+        else:
+            # Correspondance exacte ou sous-domaine
+            if hostname == core or hostname.endswith('.' + core):
+                return True
     
     return False

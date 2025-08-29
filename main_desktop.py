@@ -10,6 +10,7 @@ import uuid
 import getpass
 import socket
 import re
+import tempfile
 from pathlib import Path
 from datetime import datetime, timezone
 # Enum local pour remplacer selenium.By
@@ -378,23 +379,50 @@ class Api:
             selected_files (list): Liste des chemins relatifs des fichiers sélectionnés
         """
         try:
+            # Normaliser la clé projet (évite doublons liés aux symlinks/casse)
+            project_key = os.path.normcase(os.path.realpath(directory_path))
+            
             # Charger le cache existant
             cache = {}
             if os.path.exists(SELECTION_CACHE_PATH):
-                with open(SELECTION_CACHE_PATH, 'r', encoding='utf-8') as f:
-                    cache = json.load(f)
+                try:
+                    with open(SELECTION_CACHE_PATH, 'r', encoding='utf-8') as f:
+                        cache = json.load(f)
+                except json.JSONDecodeError:
+                    self.logger.warning("Cache corrompu — réinitialisation")
+                    cache = {}
             
             # Mettre à jour avec la nouvelle sélection
-            cache[directory_path] = selected_files
+            cache[project_key] = selected_files
             
-            # Sauvegarder
-            with open(SELECTION_CACHE_PATH, 'w', encoding='utf-8') as f:
-                json.dump(cache, f, indent=2, ensure_ascii=False)
+            # Sauvegarder de manière atomique
+            dir_path = os.path.dirname(SELECTION_CACHE_PATH)
+            with tempfile.NamedTemporaryFile('w', delete=False, dir=dir_path, 
+                                            encoding='utf-8', suffix='.tmp') as tf:
+                json.dump(cache, tf, indent=2, ensure_ascii=False)
+                tf.flush()
+                os.fsync(tf.fileno())
+                tmppath = tf.name
+            
+            # Remplacer atomiquement l'ancien fichier
+            os.replace(tmppath, SELECTION_CACHE_PATH)
+            
+            # Définir les permissions strictes (lecture/écriture propriétaire uniquement)
+            try:
+                os.chmod(SELECTION_CACHE_PATH, 0o600)
+            except:
+                pass  # Sur Windows, chmod peut ne pas fonctionner
             
             self.logger.info(f"✓ Sélection sauvegardée : {len(selected_files)} fichiers pour {directory_path}")
             
         except Exception as e:
             self.logger.error(f"✗ Erreur sauvegarde sélection : {e}")
+            # Nettoyer le fichier temporaire si erreur
+            if 'tmppath' in locals() and os.path.exists(tmppath):
+                try:
+                    os.unlink(tmppath)
+                except:
+                    pass
     
     def launch_pywebview_browser(self):
         """Lance une nouvelle fenêtre pywebview pour le navigateur"""
@@ -559,12 +587,22 @@ class Api:
             
             # Charger la sélection sauvegardée si elle existe
             saved_selection = []
+            # Normaliser la clé projet de la même manière que lors de la sauvegarde
+            project_key = os.path.normcase(os.path.realpath(directory_path))
+            
             if os.path.exists(SELECTION_CACHE_PATH):
                 try:
                     with open(SELECTION_CACHE_PATH, 'r', encoding='utf-8') as f:
                         cache = json.load(f)
-                        saved_selection = cache.get(directory_path, [])
-                        self.logger.info(f"✓ Sélection précédente trouvée : {len(saved_selection)} fichiers")
+                        # Essayer d'abord avec la clé normalisée
+                        saved_selection = cache.get(project_key, [])
+                        # Fallback sur l'ancienne clé non normalisée pour compatibilité
+                        if not saved_selection:
+                            saved_selection = cache.get(directory_path, [])
+                        if saved_selection:
+                            self.logger.info(f"✓ Sélection précédente trouvée : {len(saved_selection)} fichiers")
+                except json.JSONDecodeError:
+                    self.logger.error("✗ Cache corrompu, impossible de charger la sélection")
                 except Exception as e:
                     self.logger.error(f"✗ Erreur lecture cache : {e}")
             
