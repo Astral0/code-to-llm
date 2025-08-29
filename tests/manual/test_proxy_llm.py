@@ -9,6 +9,10 @@ import logging
 import requests
 from configparser import ConfigParser
 
+# Ajouter le répertoire parent pour accéder aux utilitaires de test
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from test_utils import mask_credentials, check_no_proxy_match
+
 # Configuration du logging
 logging.basicConfig(
     level=logging.INFO,
@@ -37,8 +41,11 @@ def test_proxy_connection(url, proxy_config):
         if proxy_config.get('https'):
             proxies['https'] = proxy_config['https']
         
+        # Utiliser la fonction utilitaire pour masquer les credentials
+        safe_proxies = {k: mask_credentials(v) for k, v in proxies.items()}
+        
         logger.info(f"Test de connexion via proxy vers {url}")
-        logger.info(f"Configuration proxy: {proxies}")
+        logger.info(f"Configuration proxy (credentials masqués): {safe_proxies}")
         
         response = requests.get(url, proxies=proxies, timeout=10)
         logger.info(f"✅ Connexion via proxy réussie: {response.status_code}")
@@ -106,16 +113,18 @@ def test_llm_proxy_config(llm_config):
     if has_proxy:
         logger.info(f"Configuration proxy détectée:")
         if llm_config['proxy_http']:
-            logger.info(f"  HTTP Proxy: {llm_config['proxy_http']}")
+            logger.info(f"  HTTP Proxy: {mask_credentials(llm_config['proxy_http'])}")
         if llm_config['proxy_https']:
-            logger.info(f"  HTTPS Proxy: {llm_config['proxy_https']}")
+            logger.info(f"  HTTPS Proxy: {mask_credentials(llm_config['proxy_https'])}")
         if llm_config['proxy_no_proxy']:
             logger.info(f"  No Proxy: {llm_config['proxy_no_proxy']}")
         
         # Vérifier si l'URL est dans la liste no_proxy
         if llm_config['proxy_no_proxy']:
-            no_proxy_list = [s.strip() for s in llm_config['proxy_no_proxy'].split(',')]
-            if any(domain in parsed.netloc for domain in no_proxy_list):
+            no_proxy_list = [s.strip() for s in llm_config['proxy_no_proxy'].split(',') if s.strip()]
+            host = parsed.hostname or ''
+            # Utiliser la fonction utilitaire pour vérifier la correspondance no_proxy
+            if check_no_proxy_match(host, no_proxy_list):
                 logger.info(f"ℹ️ {parsed.netloc} est dans la liste no_proxy - connexion directe")
                 test_direct_connection(test_url)
             else:

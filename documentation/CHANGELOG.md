@@ -82,9 +82,9 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ### 📚 Documentation
 
 - **Nouvelle documentation** :
-  - `docs/retry-failover-strategy.md` : Guide complet du système de retry et failover
-  - `docs/proxy-configuration.md` : Configuration détaillée du proxy avec exemples
-  - `CHANGELOG.md` : Ce fichier de suivi des modifications
+  - `documentation/retry-failover-strategy.md` : Guide complet du système de retry et failover
+  - `documentation/proxy-configuration.md` : Configuration détaillée du proxy avec exemples
+  - `documentation/CHANGELOG.md` : Ce fichier de suivi des modifications
   
 - **README.md mis à jour** :
   - Section "Nouvelles Fonctionnalités" avec les ajouts récents

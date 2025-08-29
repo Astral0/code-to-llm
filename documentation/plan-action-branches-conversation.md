@@ -33,7 +33,7 @@ Créer un système de **"fork" conversationnel** où chaque message peut devenir
       "sourceConversationId": "uuid-parent",
       "sourceMessageIndex": 4,
       "sourceMessageRole": "assistant",
-      "forkTimestamp": "2025-01-20T10:30:00",
+      "forkTimestamp": "2025-01-20T10:30:00Z",
       "forkReason": "exploration alternative"
     }
     // Pas de tableau "branches" - calculé dynamiquement
@@ -80,6 +80,12 @@ async forkConversationFrom(messageIndex, originalContent, role) {
     const result = await modal.getResult();
     if (!result) return;
     
+    // Vérification des limites de l'index
+    if (messageIndex < 0 || messageIndex >= this.chatHistory.length) {
+        console.warn('forkConversationFrom: messageIndex out of range');
+        return;
+    }
+    
     // Logique différenciée selon le rôle du message source
     let baseHistory;
     if (role === 'user') {
@@ -107,7 +113,8 @@ async forkConversationFrom(messageIndex, originalContent, role) {
     
     // Génération du titre pré-rempli pour la branche
     const parentTitle = this.conversationSummary || 'Conversation';
-    const suggestedTitle = `${parentTitle} - Branche ${new Date().toLocaleTimeString()}`;
+    const ts = new Date().toISOString().replace(/[:T]/g, '-').slice(0,19); // e.g., 2025-01-20-10-30-00
+    const suggestedTitle = `${parentTitle} - Branche ${ts}`;
     
     // Initialisation de la nouvelle branche
     this.initializeBranch({
@@ -116,7 +123,8 @@ async forkConversationFrom(messageIndex, originalContent, role) {
         parentRole: role,
         history: baseHistory,
         reason: result.reason,
-        suggestedTitle: suggestedTitle
+        suggestedTitle: suggestedTitle,
+        parentTitle: parentTitle
     });
 }
 ```
@@ -235,8 +243,9 @@ initializeBranch(branchData) {
     this.suggestedBranchTitle = branchData.suggestedTitle;
     
     // 6. Message système informatif
+    const parentTitle = branchData.parentTitle ?? 'Conversation';
     this.appendMessageToChat('system', 
-        `🌿 Nouvelle branche créée depuis "${branchData.parentTitle}". ` +
+        `🌿 Nouvelle branche créée depuis "${parentTitle}". ` +
         `La conversation continue dans une nouvelle direction.`
     );
     

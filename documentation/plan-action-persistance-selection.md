@@ -116,7 +116,7 @@ return response
 
 ---
 
-## Phase 2 : Frontend - HTML (`templates/index.html`)
+## Phase 2 : Frontend - HTML (`templates/toolbox.html`)
 
 ### 2.1. Ajout des Éléments UI - Interface Unifiée
 
@@ -223,7 +223,7 @@ Insérer **après** la div `#fileList` :
 
 ---
 
-## Phase 3 : Frontend - JavaScript (`static/script.js`)
+## Phase 3 : Frontend - JavaScript (`static/toolbox.js`)
 
 ### 3.1. Variables Globales
 ```javascript

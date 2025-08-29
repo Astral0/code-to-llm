@@ -57,6 +57,11 @@ SUMMARIZER_LLM_TIMEOUT = 120 # Default timeout for summarizer LLM calls
 SUMMARIZER_MAX_WORKERS = 10 # Default max workers for summarizer thread pool
 SUMMARIZER_LLM_MODELS_LIST = [] # Nouvelle variable globale
 
+# --- Variables proxy pour SummarizerLLM ---
+SUMMARIZER_PROXY_HTTP = None
+SUMMARIZER_PROXY_HTTPS = None
+SUMMARIZER_PROXY_NO_PROXY = None
+
 # --- Configuration du LLM pour le pilotage de navigateur ---
 LLM_CONFIG = {} # Initialisation de la variable globale
 
@@ -221,9 +226,14 @@ def load_config():
                     SUMMARIZER_LLM_MODEL = config.get('SummarizerLLM', 'model', fallback=None)
                     SUMMARIZER_LLM_API_TYPE = config.get('SummarizerLLM', 'api_type', fallback='ollama').lower()
                     # Configuration proxy pour SummarizerLLM
+                    global SUMMARIZER_PROXY_HTTP, SUMMARIZER_PROXY_HTTPS, SUMMARIZER_PROXY_NO_PROXY
                     SUMMARIZER_PROXY_HTTP = config.get('SummarizerLLM', 'proxy_http', fallback=None)
                     SUMMARIZER_PROXY_HTTPS = config.get('SummarizerLLM', 'proxy_https', fallback=None)
                     SUMMARIZER_PROXY_NO_PROXY = config.get('SummarizerLLM', 'proxy_no_proxy', fallback=None)
+                    # Appliquer NO_PROXY au démarrage pour éviter les mutations concurrentes
+                    if SUMMARIZER_PROXY_NO_PROXY:
+                        os.environ['NO_PROXY'] = SUMMARIZER_PROXY_NO_PROXY
+                        os.environ['no_proxy'] = SUMMARIZER_PROXY_NO_PROXY
                     SUMMARIZER_LLM_PROMPT = config.get('SummarizerLLM', 'summarizer_prompt', fallback='''Tu es un assistant d'analyse de code spécialisé. Ta seule et unique tâche est de générer un résumé JSON à partir d'un fichier de code source, en suivant un format STRICT et IMPÉRATIF.
  
  --- DEBUT DE L'EXEMPLE ---
@@ -1055,18 +1065,13 @@ def summarize_code_with_llm(content: str, file_path: str, model: str) -> str:
     
     # Configuration proxy si définie
     proxies = None
-    if 'SUMMARIZER_PROXY_HTTP' in globals() or 'SUMMARIZER_PROXY_HTTPS' in globals():
+    if SUMMARIZER_PROXY_HTTP or SUMMARIZER_PROXY_HTTPS:
         proxies = {}
-        if 'SUMMARIZER_PROXY_HTTP' in globals() and SUMMARIZER_PROXY_HTTP:
+        if SUMMARIZER_PROXY_HTTP:
             proxies['http'] = SUMMARIZER_PROXY_HTTP
-        if 'SUMMARIZER_PROXY_HTTPS' in globals() and SUMMARIZER_PROXY_HTTPS:
+        if SUMMARIZER_PROXY_HTTPS:
             proxies['https'] = SUMMARIZER_PROXY_HTTPS
-        
-        # Gérer les exclusions no_proxy
-        if 'SUMMARIZER_PROXY_NO_PROXY' in globals() and SUMMARIZER_PROXY_NO_PROXY:
-            import os
-            os.environ['NO_PROXY'] = SUMMARIZER_PROXY_NO_PROXY
-            os.environ['no_proxy'] = SUMMARIZER_PROXY_NO_PROXY
+        # NO_PROXY est déjà défini au démarrage dans load_config()
         
         if proxies:
             app.logger.info(f"Using proxy configuration for Summarizer: {proxies}")

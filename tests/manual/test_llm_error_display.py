@@ -8,8 +8,10 @@ import os
 import time
 import logging
 
-# Ajouter le répertoire parent au path
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# Ajouter la racine du dépôt au PYTHONPATH
+repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
+if repo_root not in sys.path:
+    sys.path.insert(0, repo_root)
 
 from services.llm_api_service import LlmApiService
 from services.exceptions import NetworkException
@@ -146,7 +148,7 @@ def test_retry_with_multiple_endpoints():
             },
             'endpoint3': {
                 'name': 'Endpoint 3 (OK)',
-                'url': 'https://httpbin.org/status/200',
+                'url': 'https://httpbin.org/json',
                 'model': 'test',
                 'api_type': 'openai',
                 'apikey': 'test',
