@@ -27,6 +27,10 @@ temperature = 0.7
 # max_tokens = 8192
 # Ce modèle sera sélectionné par défaut au démarrage
 default = true
+# Configuration proxy (optionnel) - décommentez et configurez si nécessaire
+# proxy_http = http://proxy.entreprise.com:8080
+# proxy_https = http://proxy.entreprise.com:8080
+# proxy_no_proxy = localhost,127.0.0.1,.entreprise.local
 
 [LLM:Claude 3.5 Sonnet]
 url = https://api.anthropic.com/v1
@@ -42,6 +46,10 @@ temperature = 0.5
 # Claude peut générer jusqu'à 8192 tokens
 # max_tokens = 8192
 default = false
+# Configuration proxy (optionnel) - décommentez et configurez si nécessaire
+# proxy_http = http://proxy.entreprise.com:8080
+# proxy_https = http://proxy.entreprise.com:8080
+# proxy_no_proxy = localhost,127.0.0.1,.entreprise.local
 
 [LLM:Ollama Local]
 url = http://localhost:11434

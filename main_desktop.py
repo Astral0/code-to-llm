@@ -10,6 +10,7 @@ import uuid
 import getpass
 import socket
 import re
+import tempfile
 from pathlib import Path
 from datetime import datetime, timezone
 # Enum local pour remplacer selenium.By
@@ -176,7 +177,11 @@ def load_service_configs():
                     'timeout_seconds': config.getint(section, 'timeout_seconds', fallback=300),
                     'temperature': safe_parse_config_value(config, section, 'temperature', float, None),
                     'max_tokens': safe_parse_config_value(config, section, 'max_tokens', int, None),
-                    'default': is_default
+                    'default': is_default,
+                    # Configuration proxy
+                    'proxy_http': config.get(section, 'proxy_http', fallback=None),
+                    'proxy_https': config.get(section, 'proxy_https', fallback=None),
+                    'proxy_no_proxy': config.get(section, 'proxy_no_proxy', fallback=None)
                 }
                 if is_default:
                     default_llm_id = llm_id
@@ -196,7 +201,11 @@ def load_service_configs():
                     'timeout_seconds': config.getint('LLMServer', 'timeout_seconds', fallback=300),
                     'temperature': safe_parse_config_value(config, 'LLMServer', 'temperature', float, None),
                     'max_tokens': safe_parse_config_value(config, 'LLMServer', 'max_tokens', int, None),
-                    'default': True
+                    'default': True,
+                    # Configuration proxy
+                    'proxy_http': config.get('LLMServer', 'proxy_http', fallback=None),
+                    'proxy_https': config.get('LLMServer', 'proxy_https', fallback=None),
+                    'proxy_no_proxy': config.get('LLMServer', 'proxy_no_proxy', fallback=None)
                 }
                 default_llm_id = 'Default'
         
@@ -211,11 +220,15 @@ SERVICE_CONFIGS = load_service_configs()
 
 # Configurer les logs selon le paramètre debug
 if CONFIG['debug']:
-    logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+    logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
     print("Mode debug activé - logs détaillés activés")
+    # S'assurer que le logger LlmApiService hérite du niveau DEBUG
+    logging.getLogger('LlmApiService').setLevel(logging.DEBUG)
 else:
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
     print("Mode normal - logs basiques activés")
+    # S'assurer que le logger LlmApiService hérite du niveau INFO
+    logging.getLogger('LlmApiService').setLevel(logging.INFO)
 
 class Api:
     def __init__(self):
@@ -238,11 +251,17 @@ class Api:
         self.llm_service = LlmApiService(SERVICE_CONFIGS['llm_service'])
         self.file_service = FileService(SERVICE_CONFIGS['file_service'])
         self.context_builder = ContextBuilderService({})
+        
+        # Test pour vérifier que les logs du service LLM fonctionnent
+        self.llm_service.logger.info("✅ Service LLM initialisé avec succès - Les logs fonctionnent !")
         self._toolbox_window = None
         self.driver = None
         self.current_directory = None
         self.file_cache = []
         self.export_service = ExportService()
+        
+        # Enregistrer un callback pour les erreurs LLM
+        self.llm_service.register_error_callback(self._handle_llm_error)
     
     def set_main_window(self, window):
         """Définit la référence à la fenêtre principale"""
@@ -360,23 +379,50 @@ class Api:
             selected_files (list): Liste des chemins relatifs des fichiers sélectionnés
         """
         try:
+            # Normaliser la clé projet (évite doublons liés aux symlinks/casse)
+            project_key = os.path.normcase(os.path.realpath(directory_path))
+            
             # Charger le cache existant
             cache = {}
             if os.path.exists(SELECTION_CACHE_PATH):
-                with open(SELECTION_CACHE_PATH, 'r', encoding='utf-8') as f:
-                    cache = json.load(f)
+                try:
+                    with open(SELECTION_CACHE_PATH, 'r', encoding='utf-8') as f:
+                        cache = json.load(f)
+                except json.JSONDecodeError:
+                    self.logger.warning("Cache corrompu — réinitialisation")
+                    cache = {}
             
             # Mettre à jour avec la nouvelle sélection
-            cache[directory_path] = selected_files
+            cache[project_key] = selected_files
             
-            # Sauvegarder
-            with open(SELECTION_CACHE_PATH, 'w', encoding='utf-8') as f:
-                json.dump(cache, f, indent=2, ensure_ascii=False)
+            # Sauvegarder de manière atomique
+            dir_path = os.path.dirname(SELECTION_CACHE_PATH)
+            with tempfile.NamedTemporaryFile('w', delete=False, dir=dir_path, 
+                                            encoding='utf-8', suffix='.tmp') as tf:
+                json.dump(cache, tf, indent=2, ensure_ascii=False)
+                tf.flush()
+                os.fsync(tf.fileno())
+                tmppath = tf.name
+            
+            # Remplacer atomiquement l'ancien fichier
+            os.replace(tmppath, SELECTION_CACHE_PATH)
+            
+            # Définir les permissions strictes (lecture/écriture propriétaire uniquement)
+            try:
+                os.chmod(SELECTION_CACHE_PATH, 0o600)
+            except:
+                pass  # Sur Windows, chmod peut ne pas fonctionner
             
             self.logger.info(f"✓ Sélection sauvegardée : {len(selected_files)} fichiers pour {directory_path}")
             
         except Exception as e:
             self.logger.error(f"✗ Erreur sauvegarde sélection : {e}")
+            # Nettoyer le fichier temporaire si erreur
+            if 'tmppath' in locals() and os.path.exists(tmppath):
+                try:
+                    os.unlink(tmppath)
+                except:
+                    pass
     
     def launch_pywebview_browser(self):
         """Lance une nouvelle fenêtre pywebview pour le navigateur"""
@@ -541,12 +587,22 @@ class Api:
             
             # Charger la sélection sauvegardée si elle existe
             saved_selection = []
+            # Normaliser la clé projet de la même manière que lors de la sauvegarde
+            project_key = os.path.normcase(os.path.realpath(directory_path))
+            
             if os.path.exists(SELECTION_CACHE_PATH):
                 try:
                     with open(SELECTION_CACHE_PATH, 'r', encoding='utf-8') as f:
                         cache = json.load(f)
-                        saved_selection = cache.get(directory_path, [])
-                        self.logger.info(f"✓ Sélection précédente trouvée : {len(saved_selection)} fichiers")
+                        # Essayer d'abord avec la clé normalisée
+                        saved_selection = cache.get(project_key, [])
+                        # Fallback sur l'ancienne clé non normalisée pour compatibilité
+                        if not saved_selection:
+                            saved_selection = cache.get(directory_path, [])
+                        if saved_selection:
+                            self.logger.info(f"✓ Sélection précédente trouvée : {len(saved_selection)} fichiers")
+                except json.JSONDecodeError:
+                    self.logger.error("✗ Cache corrompu, impossible de charger la sélection")
                 except Exception as e:
                     self.logger.error(f"✗ Erreur lecture cache : {e}")
             
@@ -786,12 +842,32 @@ class Api:
         return ""
     
     def get_stream_status(self):
-        """Retourne l'état du streaming LLM"""
+        """Retourne l'état du streaming pour le modèle LLM par défaut"""
         try:
+            # Récupérer l'état de streaming depuis la config du service
+            if hasattr(self, 'llm_service') and self.llm_service:
+                models = self.llm_service.get_available_models()
+                if models:
+                    # Trouver le modèle par défaut ou prendre le premier
+                    default_model = None
+                    for model in models:
+                        if model.get('default', False):
+                            default_model = model
+                            break
+                    if not default_model and models:
+                        default_model = models[0]
+                    
+                    if default_model:
+                        stream_enabled = default_model.get('stream_response', False)
+                        logging.info(f"Streaming status pour {default_model.get('name', 'unknown')}: {stream_enabled}")
+                        return stream_enabled
+            
+            # Fallback sur l'ancienne méthode
             config = configparser.ConfigParser()
             config.read('config.ini', encoding='utf-8')
             return config.getboolean('LLMServer', 'stream_response', fallback=False)
-        except:
+        except Exception as e:
+            logging.error(f"Erreur lors de la récupération du statut de streaming: {e}")
             return False
     
     
@@ -799,9 +875,48 @@ class Api:
         """Retourne la liste des LLMs configurés."""
         return self.llm_service.get_available_models()
     
-    def send_to_llm_stream(self, chat_history, callback_id, llm_id=None):
+    def get_llm_health_status(self):
+        """Retourne le statut de santé des endpoints LLM."""
+        return self.llm_service.get_endpoints_health()
+    
+    def reset_llm_endpoint(self, endpoint_id: str):
+        """Réinitialise le statut d'un endpoint LLM."""
+        self.llm_service.reset_endpoint_health(endpoint_id)
+        return {'success': True, 'message': f'Endpoint {endpoint_id} réinitialisé'}
+    
+    def _handle_llm_error(self, message: str, attempt: int, wait_time: float):
+        """Gère les notifications d'erreur du service LLM."""
+        try:
+            # Envoyer la notification à l'interface Toolbox si elle est ouverte
+            if self._toolbox_window:
+                error_data = {
+                    'type': 'llm_error',
+                    'message': message,
+                    'attempt': attempt,
+                    'wait_time': wait_time,
+                    'timestamp': time.time()
+                }
+                
+                # Envoyer via JavaScript
+                js_code = f"""
+                if (window.handleLLMError) {{
+                    window.handleLLMError({json.dumps(error_data)});
+                }}
+                """
+                self._toolbox_window.evaluate_js(js_code)
+                
+            logging.warning(f"LLM Error: {message}")
+        except Exception as e:
+            logging.error(f"Erreur lors de la notification d'erreur LLM: {e}")
+    
+    def send_to_llm_stream(self, chat_history, callback_id, llm_id=None, use_failover=True):
         """Envoie l'historique au LLM en mode streaming avec callback vers le frontend"""
-        logging.info(f"send_to_llm_stream appelé avec callback_id: {callback_id}, llm_id: {llm_id}")
+        logging.info(f"\n{'='*50}")
+        logging.info(f"🚀 LANCEMENT REQUÊTE STREAMING")
+        logging.info(f"Serveur LLM sélectionné: {llm_id if llm_id else 'défaut'}")
+        logging.info(f"Failover activé: {use_failover}")
+        logging.info(f"Callback ID: {callback_id}")
+        logging.info(f"{'='*50}\n")
         
         # Créer les callbacks pour gérer l'interaction avec la fenêtre
         def on_start():
@@ -820,31 +935,78 @@ class Api:
                 self._toolbox_window.evaluate_js(f'window.onStreamEnd && window.onStreamEnd("{callback_id}", {total_tokens})')
         
         def on_error(error_msg):
+            logging.error(f"Erreur LLM pour {callback_id}: {error_msg}")
             if self._toolbox_window:
                 escaped_error = error_msg.replace('\\', '\\\\').replace('"', '\\"')
+                # Envoyer l'erreur au handler spécifique du streaming
                 self._toolbox_window.evaluate_js(f'window.onStreamError && window.onStreamError("{callback_id}", "{escaped_error}")')
+                # Envoyer aussi au handler global d'erreurs LLM pour afficher la notification
+                error_data = {
+                    'type': 'llm_error',
+                    'message': str(error_msg),
+                    'attempt': -1,  # -1 pour indiquer une erreur finale
+                    'wait_time': 0,
+                    'timestamp': time.time()
+                }
+                js_code = f'window.handleLLMError && window.handleLLMError({json.dumps(error_data)})'
+                self._toolbox_window.evaluate_js(js_code)
         
         try:
-            return self.llm_service.send_to_llm_stream(
+            result = self.llm_service.send_to_llm_stream(
                 chat_history, 
                 on_start=on_start,
                 on_chunk=on_chunk,
                 on_end=on_end,
                 on_error=on_error,
-                llm_id=llm_id
+                llm_id=llm_id,
+                use_failover=use_failover
             )
+            # Si on a un résultat avec erreur, la traiter aussi
+            if result and 'error' in result:
+                on_error(result['error'])
+            return result
         except Exception as e:
-            logging.error(f"Erreur lors de l'appel au LLM en streaming: {str(e)}")
-            on_error(str(e))
-            return {'error': str(e)}
+            error_msg = f"Erreur lors de l'appel au LLM: {str(e)}"
+            logging.error(error_msg)
+            on_error(error_msg)
+            return {'error': error_msg}
     
-    def send_to_llm(self, chat_history, stream=False, llm_id=None):
+    def send_to_llm(self, chat_history, stream=False, llm_id=None, use_failover=True):
         """Envoie l'historique du chat au LLM et retourne la réponse"""
+        logging.info(f"\n{'='*50}")
+        logging.info(f"🚀 LANCEMENT REQUÊTE NON-STREAMING")
+        logging.info(f"Serveur LLM sélectionné: {llm_id if llm_id else 'défaut'}")
+        logging.info(f"Failover activé: {use_failover}")
+        logging.info(f"{'='*50}\n")
         try:
-            return self.llm_service.send_to_llm(chat_history, stream, llm_id)
+            result = self.llm_service.send_to_llm(chat_history, stream, llm_id, use_failover)
+            # Si on a un résultat avec erreur, notifier aussi via le handler global
+            if result and 'error' in result and self._toolbox_window:
+                error_data = {
+                    'type': 'llm_error',
+                    'message': result['error'],
+                    'attempt': -1,
+                    'wait_time': 0,
+                    'timestamp': time.time()
+                }
+                js_code = f'window.handleLLMError && window.handleLLMError({json.dumps(error_data)})'
+                self._toolbox_window.evaluate_js(js_code)
+            return result
         except Exception as e:
-            logging.error(f"Erreur lors de l'appel au LLM: {str(e)}")
-            return {'error': str(e)}
+            error_msg = f"Erreur lors de l'appel au LLM: {str(e)}"
+            logging.error(error_msg)
+            # Notifier via le handler global si la fenêtre est disponible
+            if self._toolbox_window:
+                error_data = {
+                    'type': 'llm_error',
+                    'message': error_msg,
+                    'attempt': -1,
+                    'wait_time': 0,
+                    'timestamp': time.time()
+                }
+                js_code = f'window.handleLLMError && window.handleLLMError({json.dumps(error_data)})'
+                self._toolbox_window.evaluate_js(js_code)
+            return {'error': error_msg}
     
     def generate_conversation_title(self, chat_history, main_context=None):
         """
